@@ -10,17 +10,22 @@ def replace_required(path: str, old: str, new: str, label: str) -> None:
 
 
 replace_required(
-    'src/App.tsx',
-    "expect(result.state.players[0].cash).toBe(300_000)",
-    "expect(result.state.players[0].cash).toBe(266_400)",
-    'quick sale test value in App guard',
-) if False else None
-
-replace_required(
     'src/game/engine/engine.test.ts',
     "expect(result.state.players[0].cash).toBe(300_000)",
     "expect(result.state.players[0].cash).toBe(266_400)",
     'quick sale engine test value',
+)
+replace_required(
+    'src/game/engine/engine.test.ts',
+    "expect(sale.state.players[0].cash).toBe(240_000)",
+    "expect(sale.state.players[0].cash).toBe(233_700)",
+    'secured quick sale proceeds',
+)
+replace_required(
+    'src/game/engine/engine.test.ts',
+    "expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 20_000 })",
+    "expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 21_400 })",
+    'distressed quick sale deficiency',
 )
 
 replace_required(
