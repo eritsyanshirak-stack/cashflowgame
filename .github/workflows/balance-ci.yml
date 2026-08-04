@@ -20,91 +20,45 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Apply one-shot balance transformation
+
+      - name: Generate balance v1.2 source
         id: balance_patch
+        if: github.event_name == 'push'
         run: |
-          if [ -f scripts/apply-balance-v12.mjs ]; then
-            sed -i '/freedomProgress(player, game.stockMarket)}% пути/d' scripts/apply-balance-v12.mjs
-            node scripts/apply-balance-v12.mjs
-            python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          balance = Path('src/game/engine/balance.test.ts')
-          text = balance.read_text()
-          text = text.replace(
-              "assessLoan, assetCashflow, freedomProgress, isFinanciallyFree",
-              "assessLoan, isFinanciallyFree",
-          )
-          text = text.replace(
-              "player.cash = 100_000\n    const modestGap = assessLoan(player, 80_000",
-              "player.cash = 150_000\n    const modestGap = assessLoan(player, 30_000",
-          )
-          text = text.replace(
-              "player.assets = Array.from({ length: 4 }, (_, index) => testAsset('coffee', player.id, index))",
-              "player.assets = Array.from({ length: 3 }, (_, index) => testAsset('coffee', player.id, index))",
-          )
-          text = text.replace(
-              "player.assets.push(testAsset('coffee', player.id, 5))",
-              "player.assets.push(testAsset('coffee', player.id, 4))",
-          )
-          balance.write_text(text)
-
-          engine = Path('src/game/engine/engine.test.ts')
-          text = engine.read_text()
-          text = text.replace(
-              "game.players[0].cash = 100_000\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0].balance).toBe(50_000)",
-              "game.players[0].cash = 140_000\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0].balance).toBe(10_000)",
-              1,
-          )
-          text = text.replace(
-              "game.players[0].cash = 100_000\n\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 80_000, annualRate: 0.25, termMonths: 36 })",
-              "game.players[0].cash = 150_000\n\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 30_000, annualRate: 0.25, termMonths: 36 })",
-              1,
-          )
-          freedom_pattern = re.compile(
-              r"  it\('requires a three-month liquid reserve and a three-month streak before declaring financial freedom',[\s\S]*?\n  \}\)\n"
-          )
-          freedom_replacement = """  it('requires a three-month streak after all freedom conditions are met', () => {
-              const game = startedGame()
-              const player = game.players[0]
-              player.assets = []
-              player.bonds = Math.ceil(monthlyExpenses(player) / 0.014) + 1_000_000
-              player.freedomStreak = 2
-              expect(isFinanciallyFree(player, game.stockMarket)).toBe(false)
-              player.freedomStreak = 3
-              expect(isFinanciallyFree(player, game.stockMarket)).toBe(true)
-            })
-          """
-          text, count = freedom_pattern.subn(freedom_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('Could not update freedom streak test')
-          engine.write_text(text)
-          PY
-            rm scripts/apply-balance-v12.mjs
-            echo "applied=true" >> "$GITHUB_OUTPUT"
-          else
+          if grep -q "export type BusinessIssue" src/game/domain/types.ts; then
             echo "applied=false" >> "$GITHUB_OUTPUT"
+            echo "Balance v1.2 is already materialized in source."
+          else
+            python3 scripts/apply_balance_v12_packed.py
+            python3 scripts/apply_balance_v12_fixes.py
+            echo "applied=true" >> "$GITHUB_OUTPUT"
           fi
+
       - name: Install dependencies
         run: npm ci
+
       - name: Run tests
         run: npm test
+
       - name: Build production bundle
         run: npm run build
+
       - name: Commit verified balance source
         if: github.event_name == 'push' && steps.balance_patch.outputs.applied == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/apply-balance-v12.mjs scripts/apply_balance_v12_packed.py scripts/apply_balance_v12_fixes.py
           git add -A
-          git commit -m "feat: rebalance businesses, freedom rules and bots"
+          git commit -m "feat: add realistic risk, due diligence and debt enforcement"
           git push origin HEAD:balance-v1.1
+
       - name: Upload preview bundle
         uses: actions/upload-artifact@v4
         with:
@@ -112,6 +66,7 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 3
+
       - name: Publish static preview branch
         if: github.event_name == 'push'
         run: |
