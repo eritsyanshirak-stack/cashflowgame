@@ -1,99 +1,14 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-  <meta name="theme-color" content="#07111f" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Выход из круга" />
-  <title>Выход из круга</title>
-  <link rel="stylesheet" href="styles.css?v=3" />
-</head>
-<body>
-  <div id="app" class="app-shell">
-    <section id="setupScreen" class="screen setup-screen">
-      <div class="brand-mark"><span>CF</span><div><b>CASHFLOW</b><small>PRIVATE GAME</small></div></div>
-      <div class="hero-card premium-hero">
-        <div class="eyebrow">ФИНАНСОВЫЙ СИМУЛЯТОР</div>
-        <h1>Выход<br>из круга</h1>
-        <p>Собери капитал, покупай сильные активы и сделай пассивный доход выше расходов.</p>
-        <div class="hero-features"><span>Бизнес</span><span>Биржа</span><span>Переговоры</span><span>Риск</span></div>
-      </div>
-
-      <div class="setup-panel">
-        <div class="setup-grid">
-          <label class="field"><span>Профессия</span><select id="professionSelect"></select></label>
-          <label class="field"><span>Соперники</span><select id="botCountSelect"><option value="1">1 бот</option><option value="2" selected>2 бота</option><option value="3">3 бота</option></select></label>
-          <label class="field"><span>Сложность</span><select id="difficultySelect"><option value="easy">Лёгкая</option><option value="normal" selected>Нормальная</option><option value="hard">Сложная</option></select></label>
-          <label class="field"><span>Подсказки</span><select id="hintsSelect"><option value="on" selected>Включены</option><option value="off">Выключены</option></select></label>
-        </div>
-        <div class="setup-actions">
-          <button id="newGameBtn" class="btn btn-primary btn-xl">Начать игру</button>
-          <button id="continueGameBtn" class="btn btn-secondary btn-xl hidden" hidden>Продолжить сохранённую</button>
-        </div>
-      </div>
-      <div class="disclaimer">Игровые котировки. Не финансовая рекомендация.</div>
-    </section>
-
-    <section id="gameScreen" class="screen game-screen hidden" hidden>
-      <header class="topbar premium-topbar">
-        <div><div id="playerRank" class="rank-chip">🌱 Новичок</div><div id="turnLabel" class="turn-label">Твой ход</div></div>
-        <div class="calendar-card"><strong id="calendarText">День 1 · месяц 1</strong><span id="salaryText">До расчёта 29 дней</span></div>
-      </header>
-      <div class="month-progress"><i id="monthProgress"></i></div>
-      <div id="playersStrip" class="players-strip"></div>
-
-      <section class="wealth-card">
-        <div class="wealth-main"><span>Деньги сейчас</span><strong id="cashStat">0 ₽</strong></div>
-        <div class="freedom-goal"><span>До финансовой свободы</span><strong id="freedomGapStat">0 ₽/мес</strong><small>Пассивный доход должен покрыть расходы</small></div>
-      </section>
-      <section class="stats-grid premium-stats">
-        <article class="stat-card"><span>Чистый капитал</span><strong id="worthStat">0 ₽</strong></article>
-        <article class="stat-card"><span>Пассивный доход</span><strong id="passiveStat">0 ₽/мес</strong></article>
-        <article class="stat-card"><span>Все расходы</span><strong id="expenseStat">0 ₽/мес</strong></article>
-        <article class="stat-card"><span>Свободный поток</span><strong id="flowStat">0 ₽/мес</strong></article>
-      </section>
-
-      <section class="board-card premium-board"><div class="board-label"><span>Игровое поле</span><b id="boardPositionLabel">Клетка 1 из 28</b></div><div id="board" class="board" aria-label="Игровое поле"></div></section>
-
-      <section class="turn-card premium-turn">
-        <div class="turn-card-head"><div><span class="eyebrow">ТЕКУЩЕЕ СОБЫТИЕ</span><strong id="currentCellLabel">Расчёт</strong></div><div id="die" class="die">⚄</div></div>
-        <p id="statusText">Бросай кубик. На первых ходах игра будет объяснять смысл решений.</p>
-        <button id="rollBtn" class="btn btn-roll"><span>Бросить кубик</span><small>Начать ход</small></button>
-      </section>
-
-      <section class="log-section"><div class="section-title">Последние события</div><div id="eventLog" class="event-log"></div></section>
-
-      <nav class="bottom-nav" aria-label="Навигация игры">
-        <button data-nav="assets"><b>◇</b><span>Активы</span></button>
-        <button data-nav="market"><b>↗</b><span>Биржа</span></button>
-        <button data-nav="bank"><b>₽</b><span>Банк</span></button>
-        <button data-nav="growth"><b>＋</b><span>Развитие</span></button>
-        <button data-nav="journal"><b>≡</b><span>Журнал</span></button>
-      </nav>
-    </section>
-  </div>
-
-  <div id="sheetBackdrop" class="sheet-backdrop hidden" hidden>
-    <section class="sheet" role="dialog" aria-modal="true">
-      <header class="sheet-header"><div><span id="sheetType" class="eyebrow">РАЗДЕЛ</span><h2 id="sheetTitle">Заголовок</h2></div><button id="sheetCloseBtn" class="icon-btn">Закрыть</button></header>
-      <div id="sheetBody" class="sheet-body"></div>
-    </section>
-  </div>
-  <div id="loadError" hidden class="load-error">Не удалось загрузить игру. Обнови страницу.</div>
-  <script src="game.js?v=3" onerror="document.getElementById('loadError').hidden=false"></script>
-  <script>
-    setInterval(function(){
-      try {
-        if (typeof state==='undefined' || !state.started) return;
-        var p=state.players[0], gap=Math.max(0,monthlyExpenses(p)-passive(p)), free=monthlyFlow(p);
-        var g=document.getElementById('freedomGapStat'), f=document.getElementById('flowStat'), pos=document.getElementById('boardPositionLabel');
-        if(g) g.textContent=money(gap)+'/мес';
-        if(f){ f.textContent=(free>=0?'+':'')+money(free)+'/мес'; f.classList.toggle('good',free>=0); f.classList.toggle('bad',free<0); }
-        if(pos) pos.textContent='Клетка '+(state.players[state.current].pos+1)+' из '+cells.length;
-      } catch(e) {}
-    },300);
-  </script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0b0b" />
+    <meta name="description" content="Выход из круга — мобильная финансовая стратегия" />
+    <title>Выход из круга</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
