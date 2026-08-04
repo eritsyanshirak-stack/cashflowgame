@@ -1,8 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&display=swap');
 :root { font-family: Manrope, system-ui, sans-serif; color: #f4f0e7; background: #0a0b0b; font-synthesis: none; }
 * { box-sizing: border-box; }
-html { background: #0a0b0b; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 50% -10%, #293027 0, #111412 32%, #080909 70%); }
+html { background: #070c0e; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 50% -15%, #243034 0, #101719 31%, #070c0e 70%); }
 button, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }

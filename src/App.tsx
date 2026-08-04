@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import './App.css'
+import './premium.css'
 import { board, businesses, professions } from './game/content/content'
 import type { Decision, Funding, GameCommand } from './game/domain/types'
 import { assetCashflow, monthlyCashflow, monthlyExpenses, netWorth, passiveIncome, totalDebt } from './game/systems/economy'

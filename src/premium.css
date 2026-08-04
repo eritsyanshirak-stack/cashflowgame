@@ -1,0 +1,137 @@
+:root {
+  --acid: #d8b978;
+  --paper: #f3eee4;
+  --muted: #7f898e;
+  --line: rgba(216, 185, 120, 0.12);
+  --panel: #12191c;
+  --bad: #df796e;
+}
+
+.eyebrow { font-size: 9px; }
+.brand-mark { border-color: rgba(216, 185, 120, 0.34); transform: none; }
+.setup-card { background: rgba(16, 23, 26, 0.9); border-radius: 16px; }
+.setup-card select { background: #0b1012; border-color: var(--line); border-radius: 10px; }
+.profession-grid,
+.stats-grid,
+.deal-grid { border-color: var(--line); border-radius: 12px; overflow: hidden; }
+.metric { background: #101719; }
+.primary-action {
+  background: linear-gradient(135deg, #e1c589, #caa55d);
+  box-shadow: 0 8px 28px rgba(202, 165, 93, 0.12);
+}
+.primary-action,
+.ghost-action { border-radius: 12px; min-height: 50px; }
+
+.topbar {
+  height: 60px;
+  padding: max(9px, env(safe-area-inset-top)) 14px 7px;
+  border-bottom-color: rgba(216, 185, 120, 0.08);
+  background: rgba(8, 13, 15, 0.52);
+  backdrop-filter: blur(16px);
+}
+.topbar strong { font-size: 13px; color: #d7d8d2; }
+.icon-button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.045);
+  color: #aeb5b6;
+  font-size: 15px;
+}
+.hero-stats { padding: 11px 14px 9px; border-bottom-color: rgba(216, 185, 120, 0.08); }
+.progress { height: 2px; margin: 6px 0 9px; background: #273034; border-radius: 4px; }
+.progress i {
+  background: linear-gradient(90deg, #b88d45, var(--acid));
+  box-shadow: 0 0 12px rgba(216, 185, 120, 0.25);
+}
+.stats-grid {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.stats-grid .metric {
+  padding: 5px 8px;
+  background: transparent;
+  border-right: 1px solid rgba(216, 185, 120, 0.09);
+}
+.stats-grid .metric:last-child { border-right: 0; }
+.stats-grid .metric small { font-size: 7px; letter-spacing: 0.03em; white-space: nowrap; }
+.stats-grid .metric strong { font-size: 12px; }
+
+.board-section,
+.content-section { padding: 12px 14px 94px; }
+.turn-card { margin-bottom: 9px; }
+.turn-card strong { font-size: 17px; }
+.die {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: linear-gradient(145deg, #f1e7d2, #cdbb98);
+  font-size: 19px;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.25);
+}
+.board-track { gap: 3px; }
+.tile {
+  background: linear-gradient(145deg, #12191c, #0e1416);
+  border-color: rgba(216, 185, 120, 0.07);
+  border-radius: 8px;
+}
+.tile.current {
+  border-color: rgba(216, 185, 120, 0.72);
+  background: linear-gradient(145deg, #24251f, #151b1c);
+  box-shadow: inset 0 0 0 1px rgba(216, 185, 120, 0.2), 0 0 18px rgba(216, 185, 120, 0.08);
+}
+.tile > span { font-size: 16px; filter: grayscale(0.5) saturate(0.65); opacity: 0.82; }
+.tile.current > span { opacity: 1; }
+.tokens i.human { box-shadow: 0 0 6px rgba(216, 185, 120, 0.7); }
+
+.roll-button {
+  height: 56px;
+  margin: 10px 0 8px;
+  padding: 8px 14px;
+  grid-template-columns: 38px 1fr;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #e1c589, #caa55d);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.18);
+}
+.roll-button .cube { font-size: 26px; }
+.roll-button b { font-size: 13px; }
+.roll-button small { font-size: 8px; }
+.rivals { gap: 6px; }
+.rivals > div {
+  gap: 7px;
+  padding: 7px 9px;
+  background: rgba(17, 24, 27, 0.7);
+  border: 0;
+  border-radius: 10px;
+}
+.rivals i { width: 18px; height: 18px; background: linear-gradient(135deg, #737c7e, #252c2f); }
+
+.bottom-nav {
+  height: calc(66px + env(safe-area-inset-bottom));
+  padding: 7px 38px env(safe-area-inset-bottom);
+  background: rgba(7, 12, 14, 0.92);
+  border-top-color: rgba(216, 185, 120, 0.09);
+  backdrop-filter: blur(22px);
+}
+.bottom-nav button { font-size: 8px; gap: 3px; color: #687277; }
+.bottom-nav button span { font-size: 17px; }
+.asset-card {
+  background: linear-gradient(145deg, #12191c, #0e1416);
+  border-color: rgba(216, 185, 120, 0.08);
+  border-radius: 12px;
+}
+.asset-icon,
+.deal-title > span { background: rgba(216, 185, 120, 0.08); border-radius: 12px; }
+.decision-sheet { background: #101719; border-top-color: rgba(216, 185, 120, 0.24); }
+.split-actions button { background: #182125; border-color: rgba(216, 185, 120, 0.11); border-radius: 10px; }
+.cash-check { background: #0a1012; }
+
+@media (max-width: 370px) {
+  .stats-grid .metric { padding-inline: 5px; }
+  .stats-grid .metric strong { font-size: 11px; }
+  .tile > span { font-size: 14px; }
+}
