@@ -62,37 +62,48 @@ export const rareDeals = [
 export const board: { type: CellType; icon: string; label: string }[] = [
   { type: 'salary', icon: '📅', label: 'Расчёт' },
   { type: 'business', icon: '🏢', label: 'Бизнес' },
+  { type: 'contract', icon: '📋', label: 'Контракт' },
   { type: 'market', icon: '📈', label: 'Рынок' },
   { type: 'expense', icon: '💸', label: 'Расход' },
-  { type: 'chance', icon: '💡', label: 'Шанс' },
   { type: 'bank', icon: '🏦', label: 'Банк' },
   { type: 'growth', icon: '🚀', label: 'Развитие' },
   { type: 'business', icon: '🏢', label: 'Бизнес' },
+  { type: 'auction', icon: '🔨', label: 'Аукцион' },
+  { type: 'chance', icon: '💡', label: 'Шанс' },
+  { type: 'partnership', icon: '🤝', label: 'Партнёр' },
+  { type: 'management', icon: '🧭', label: 'Управление' },
+  { type: 'bank', icon: '🏦', label: 'Банк' },
   { type: 'expense', icon: '💸', label: 'Расход' },
+  { type: 'growth', icon: '🚀', label: 'Развитие' },
+  { type: 'business', icon: '🏢', label: 'Бизнес' },
   { type: 'market', icon: '📰', label: 'Рынок' },
-  { type: 'business', icon: '🏢', label: 'Бизнес' },
+  { type: 'contract', icon: '📋', label: 'Контракт' },
   { type: 'chance', icon: '💡', label: 'Шанс' },
-  { type: 'bank', icon: '🏦', label: 'Банк' },
-  { type: 'expense', icon: '💸', label: 'Расход' },
-  { type: 'growth', icon: '🚀', label: 'Развитие' },
-  { type: 'business', icon: '🏢', label: 'Бизнес' },
-  { type: 'market', icon: '📈', label: 'Рынок' },
-  { type: 'chance', icon: '💡', label: 'Шанс' },
-  { type: 'expense', icon: '💸', label: 'Расход' },
   { type: 'business', icon: '🏢', label: 'Бизнес' },
 ]
 
 export const expenseCards = [
-  ['Ремонт автомобиля', 85_000],
-  ['Стоматолог', 70_000],
-  ['Сломалась техника', 55_000],
-  ['Налоговая доплата', 120_000],
-  ['Ремонт квартиры', 180_000],
-  ['Штраф и эвакуация автомобиля', 42_000],
-  ['Срочная поездка к семье', 95_000],
-  ['Подорожала страховка', 64_000],
-  ['Замена рабочего ноутбука', 135_000],
+  ['Ремонт автомобиля', 17_000],
+  ['Стоматолог', 14_000],
+  ['Сломалась техника', 11_000],
+  ['Налоговая доплата', 24_000],
+  ['Ремонт квартиры', 36_000],
+  ['Штраф и эвакуация автомобиля', 8_400],
+  ['Срочная поездка к семье', 19_000],
+  ['Подорожала страховка', 12_800],
+  ['Замена рабочего ноутбука', 27_000],
 ] as const
+
+export const expenseScenarios = expenseCards.map(([title, amount], index) => ({
+  id: `expense-${index}`,
+  title,
+  amount,
+  options: [
+    { id: 'full' as const, title: 'Решить сразу', description: 'Заплатить полную сумму без будущего риска.', amount },
+    { id: 'economy' as const, title: 'Сэкономить сейчас', description: 'Заплатить 45%, но есть риск повторного расхода в следующем месяце.', amount: Math.max(3_000, Math.round(amount * 0.45)), riskChance: 0.34, riskAmount: Math.round(amount * 0.8) },
+    { id: 'challenge' as const, title: 'Оспорить или сделать самому', description: 'Заплатить мало. Можно решить вопрос, а можно получить увеличенный счёт.', amount: Math.max(1_500, Math.round(amount * 0.15)), riskChance: 0.52, riskAmount: Math.round(amount * 1.15) },
+  ],
+}))
 
 export const chanceCards = [
   ['Партия техники', 100_000, 72_000, 162_000, 1],
@@ -106,24 +117,44 @@ export const chanceCards = [
   ['Мотоцикл на перепродажу', 420_000, 310_000, 650_000, 3],
 ] as const
 
+export const contractCards = [
+  { id: 'launch-campaign', title: 'Запуск рекламной кампании', description: 'Клиент платит за результат через месяц.', skillId: 'marketing' as const, baseInvestment: 24_000, basePayout: 56_000 },
+  { id: 'corporate-training', title: 'Корпоративное обучение', description: 'Можно взять простой пакет или собрать большую программу.', skillId: 'brand' as const, baseInvestment: 18_000, basePayout: 48_000 },
+  { id: 'automation-project', title: 'Автоматизация отдела', description: 'Чем смелее объём проекта, тем выше прибыль и риск срыва.', skillId: 'management' as const, baseInvestment: 42_000, basePayout: 96_000 },
+  { id: 'sales-sprint', title: 'Спринт продаж', description: 'Нужно вложиться в команду и закрыть план клиента.', skillId: 'negotiation' as const, baseInvestment: 30_000, basePayout: 72_000 },
+  { id: 'financial-audit', title: 'Финансовый аудит', description: 'Крупный заказ требует точности и хорошего навыка финансов.', skillId: 'finance' as const, baseInvestment: 36_000, basePayout: 84_000 },
+  { id: 'personal-brand', title: 'Продюсирование эксперта', description: 'Можно сделать безопасный мини-запуск или рискнуть бюджетом.', skillId: 'brand' as const, baseInvestment: 28_000, basePayout: 68_000 },
+] as const
+
+export const globalEvents = [
+  { id: 'delivery-boom', title: 'Бум доставки', description: 'Онлайн и общепит получают больше заказов три месяца.', category: 'Онлайн', sector: 'Ритейл', revenueMultiplier: 1.14, stockImpact: 0.12, creditRateDelta: 0, duration: 3 },
+  { id: 'rent-growth', title: 'Аренда дорожает', description: 'Офлайн-бизнесы теряют часть маржи два месяца.', category: 'Услуги', sector: null, revenueMultiplier: 0.88, stockImpact: 0, creditRateDelta: 0, duration: 2 },
+  { id: 'cheap-credit', title: 'Ставку снизили', description: 'Новые кредиты дешевле следующие два месяца.', category: null, sector: 'Финансы', revenueMultiplier: 1, stockImpact: 0.16, creditRateDelta: -0.04, duration: 2 },
+  { id: 'tight-credit', title: 'Банк ужесточил условия', description: 'Новые кредиты дороже следующие два месяца.', category: null, sector: 'Финансы', revenueMultiplier: 1, stockImpact: -0.18, creditRateDelta: 0.05, duration: 2 },
+  { id: 'tech-rally', title: 'Технологический рывок', description: 'IT и технологические акции растут, но волатильность выше.', category: 'IT', sector: 'Технологии', revenueMultiplier: 1.16, stockImpact: 0.28, creditRateDelta: 0, duration: 2 },
+  { id: 'consumer-slowdown', title: 'Покупатели экономят', description: 'Ритейл и общепит проседают на два месяца.', category: 'Общепит', sector: 'Ритейл', revenueMultiplier: 0.82, stockImpact: -0.26, creditRateDelta: 0, duration: 2 },
+  { id: 'property-demand', title: 'Спрос на аренду вырос', description: 'Недвижимость получает больше дохода три месяца.', category: 'Недвижимость', sector: 'Финансы', revenueMultiplier: 1.12, stockImpact: 0.08, creditRateDelta: 0, duration: 3 },
+  { id: 'energy-shock', title: 'Энергетический шок', description: 'Энергетика резко меняется, а расходы бизнеса растут.', category: 'Производство', sector: 'Энергетика', revenueMultiplier: 0.86, stockImpact: -0.34, creditRateDelta: 0.01, duration: 2 },
+] as const
+
 export const initialStockMarket: StockQuote[] = [
-  { id: 'energy', name: 'Север Энерго', ticker: 'SEVR', sector: 'Энергетика', price: 18_400, previousPrice: 18_400, dividendYield: 0.072 },
-  { id: 'tech', name: 'Нова Тех', ticker: 'NOVA', sector: 'Технологии', price: 31_800, previousPrice: 31_800, dividendYield: 0.018 },
-  { id: 'retail', name: 'Город Маркет', ticker: 'CITY', sector: 'Ритейл', price: 12_600, previousPrice: 12_600, dividendYield: 0.048 },
-  { id: 'bank', name: 'Первый Банк', ticker: 'BANK', sector: 'Финансы', price: 24_200, previousPrice: 24_200, dividendYield: 0.061 },
-  { id: 'biotech', name: 'Вита Лаб', ticker: 'VITA', sector: 'Биотех', price: 42_500, previousPrice: 42_500, dividendYield: 0.008 },
+  { id: 'energy', name: 'Север Энерго', ticker: 'SEVR', sector: 'Энергетика', price: 4_600, previousPrice: 4_600, dividendYield: 0.072 },
+  { id: 'tech', name: 'Нова Тех', ticker: 'NOVA', sector: 'Технологии', price: 7_950, previousPrice: 7_950, dividendYield: 0.018 },
+  { id: 'retail', name: 'Город Маркет', ticker: 'CITY', sector: 'Ритейл', price: 3_150, previousPrice: 3_150, dividendYield: 0.048 },
+  { id: 'bank', name: 'Первый Банк', ticker: 'BANK', sector: 'Финансы', price: 6_050, previousPrice: 6_050, dividendYield: 0.061 },
+  { id: 'biotech', name: 'Вита Лаб', ticker: 'VITA', sector: 'Биотех', price: 8_500, previousPrice: 8_500, dividendYield: 0.008 },
 ]
 
 export const marketHeadlines = [
-  { title: 'Ставку снизили', sector: 'Финансы', impact: 0.08 },
-  { title: 'Спрос на технологии ускорился', sector: 'Технологии', impact: 0.11 },
-  { title: 'Потребители начали экономить', sector: 'Ритейл', impact: -0.09 },
-  { title: 'Новый экспортный контракт', sector: 'Энергетика', impact: 0.1 },
-  { title: 'Испытания препарата задержались', sector: 'Биотех', impact: -0.13 },
+  { title: 'Ставку снизили', sector: 'Финансы', impact: 0.12 },
+  { title: 'Спрос на технологии ускорился', sector: 'Технологии', impact: 0.18 },
+  { title: 'Потребители начали экономить', sector: 'Ритейл', impact: -0.16 },
+  { title: 'Новый экспортный контракт', sector: 'Энергетика', impact: 0.17 },
+  { title: 'Испытания препарата задержались', sector: 'Биотех', impact: -0.21 },
   { title: 'Рынок ждёт новых данных', sector: null, impact: 0 },
-  { title: 'Банки ужесточили кредитование', sector: 'Финансы', impact: -0.08 },
-  { title: 'Ритейл отчитался сильнее ожиданий', sector: 'Ритейл', impact: 0.09 },
-  { title: 'Цены на энергию снизились', sector: 'Энергетика', impact: -0.1 },
-  { title: 'Биотех получил государственный заказ', sector: 'Биотех', impact: 0.12 },
-  { title: 'Технологический сектор перегрет', sector: 'Технологии', impact: -0.08 },
+  { title: 'Банки ужесточили кредитование', sector: 'Финансы', impact: -0.15 },
+  { title: 'Ритейл отчитался сильнее ожиданий', sector: 'Ритейл', impact: 0.16 },
+  { title: 'Цены на энергию снизились', sector: 'Энергетика', impact: -0.18 },
+  { title: 'Биотех получил государственный заказ', sector: 'Биотех', impact: 0.2 },
+  { title: 'Технологический сектор перегрет', sector: 'Технологии', impact: -0.15 },
 ] as const
