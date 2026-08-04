@@ -44,6 +44,16 @@ jobs:
             echo "applied=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Add atomic deal financing
+        id: deal_financing
+        run: |
+          if [ -f scripts/apply_deal_financing.py ]; then
+            python3 scripts/apply_deal_financing.py
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: npm ci
 
@@ -53,14 +63,14 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
-      - name: Commit verified balance source
-        if: steps.balance_patch.outputs.applied == 'true'
+      - name: Commit verified source changes
+        if: steps.balance_patch.outputs.applied == 'true' || steps.deal_financing.outputs.applied == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f scripts/apply_balance_v12_packed.py scripts/apply_balance_v12_fixes.py
+          rm -f scripts/apply_balance_v12_packed.py scripts/apply_balance_v12_fixes.py scripts/apply_deal_financing.py
           git add -A
-          git commit -m "feat: add realistic risk, due diligence and debt enforcement"
+          git commit -m "feat: add atomic asset sales and collateral inside deals"
           git push origin HEAD:balance-v1.1
 
       - name: Upload preview bundle
