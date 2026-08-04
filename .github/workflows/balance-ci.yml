@@ -8,6 +8,9 @@ on:
     branches:
       - rewrite/react-mvp
 
+permissions:
+  contents: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -33,3 +36,17 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 3
+      - name: Publish static preview branch
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p /tmp/balance-preview
+          cp -R dist/. /tmp/balance-preview/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan balance-preview-static
+          git rm -rf .
+          cp -R /tmp/balance-preview/. .
+          touch .nojekyll
+          git add -A
+          git commit -m "preview: balance v1.1 ${GITHUB_SHA}"
+          git push --force origin HEAD:balance-preview-static
