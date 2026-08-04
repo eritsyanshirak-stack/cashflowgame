@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { businesses } from '../content/content'
 import { executeCommand, emptyGame } from './engine'
-import { assessLoan, assetCashflow, competitionStandings, freedomProgress, isFinanciallyFree, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
+import { assessLoan, assetCashflow, competitionStandings, freedomProgress, isFinanciallyFree, loanPayment, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
 import type { Asset } from '../domain/types'
 import { playerLevel, skillLevel } from '../systems/progression'
 
 const startedGame = (seed = 7) => executeCommand(emptyGame(seed), { type: 'START_GAME', professionId: 'trainer', seed }).state
 const testAsset = (businessId: string, ownerId: string): Asset => {
   const business = businesses.find((item) => item.id === businessId)!
-  return { ...business, ownerId, ownership: 1, monthlyPayment: Math.round(business.loan * 0.015), purchaseMonth: 1, developmentLevel: 0, developments: [], totalDevelopmentCost: 0, lastDevelopedMonth: null, saleOffer: null, offerExpiresMonth: null }
+  return { ...business, ownerId, ownership: 1, monthlyPayment: loanPayment(business.loan, business.loanAnnualRate, business.loanTermMonths), purchaseMonth: 1, developmentLevel: 0, developments: [], totalDevelopmentCost: 0, lastDevelopedMonth: null, saleOffer: null, offerExpiresMonth: null }
 }
 
 describe('game engine', () => {
@@ -31,9 +31,9 @@ describe('game engine', () => {
     const game = startedGame()
     const player = game.players[0]
     player.assets.push(testAsset('coffee', player.id))
-    expect(assetCashflow(player.assets[0])).toBe(41_050)
-    expect(passiveIncome(player)).toBe(41_050)
-    expect(monthlyCashflow(player)).toBe(85_450)
+    expect(assetCashflow(player.assets[0])).toBe(8_507)
+    expect(passiveIncome(player)).toBe(8_507)
+    expect(monthlyCashflow(player)).toBe(52_907)
   })
 
   it('charges and gradually repays profession debt each month', () => {
@@ -68,7 +68,7 @@ describe('game engine', () => {
     const asset = result.state.players[0].assets[0]
     expect(result.accepted).toBe(true)
     expect(asset.ownership).toBe(0.5)
-    expect(asset.revenue).toBe(36_000)
+    expect(asset.revenue).toBe(31_000)
     expect(result.state.players[0].cash).toBe(75_000)
   })
 
@@ -86,11 +86,11 @@ describe('game engine', () => {
     const game = startedGame()
     game.phase = 'decision'
     game.pendingDecision = { kind: 'business', businessId: 'coffee', askingPrice: 480_000, negotiated: false }
-    game.players[0].cash = 100_000
+    game.players[0].cash = 140_000
     const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })
     expect(result.accepted).toBe(true)
     expect(result.state.players[0].cash).toBe(0)
-    expect(result.state.players[0].loans[0].balance).toBe(50_000)
+    expect(result.state.players[0].loans[0].balance).toBe(10_000)
   })
 
   it('does not finance the entire business contribution without buyer money', () => {
@@ -207,7 +207,7 @@ describe('game engine', () => {
 
     expect(result.accepted).toBe(true)
     expect(asset.developmentLevel).toBe(1)
-    expect(asset.revenue).toBe(83_520)
+    expect(asset.revenue).toBe(66_960)
     expect(asset.marketValue).toBeGreaterThan(480_000)
     expect(executeCommand(result.state, { type: 'DEVELOP_ASSET', assetId: asset.id, developmentId: 'automation' }).accepted).toBe(false)
   })
@@ -223,7 +223,7 @@ describe('game engine', () => {
 
     expect(result.accepted).toBe(true)
     expect(result.state.players[0].assets[0].ownership).toBe(0.6)
-    expect(result.state.players[0].assets[0].revenue).toBe(43_200)
+    expect(result.state.players[0].assets[0].revenue).toBe(37_200)
   })
 
   it('starts distinct bot strategies and keeps selected difficulty', () => {
@@ -251,13 +251,13 @@ describe('game engine', () => {
     const game = startedGame()
     game.phase = 'decision'
     game.pendingDecision = { kind: 'business', businessId: 'pickup', askingPrice: 620_000, negotiated: false }
-    game.players[0].cash = 100_000
+    game.players[0].cash = 150_000
 
     const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })
 
     expect(result.accepted).toBe(true)
     expect(result.state.players[0].cash).toBe(0)
-    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 80_000, annualRate: 0.25, termMonths: 36 })
+    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 30_000, annualRate: 0.25, termMonths: 36 })
     expect(result.state.players[0].loans[0].monthlyPayment).toBeGreaterThan(0)
   })
 
@@ -424,8 +424,8 @@ describe('game engine', () => {
 
     const result = executeCommand(game, { type: 'DEVELOP_ASSET', assetId: player.assets[0].id, developmentId: 'marketing' })
     expect(result.accepted).toBe(true)
-    expect(result.state.players[0].cash).toBe(500_000 - 31_488)
-    expect(result.state.players[0].assets[0].revenue).toBe(92_160)
+    expect(result.state.players[0].cash).toBe(500_000 - 39_360)
+    expect(result.state.players[0].assets[0].revenue).toBe(74_400)
   })
 
   it('finance skill improves real bank terms without removing underwriting', () => {
@@ -455,6 +455,7 @@ describe('game engine', () => {
     const game = executeCommand(emptyGame(31), { type: 'START_GAME', professionId: 'trainer', botCount: 1, seed: 31 }).state
     const bot = game.players[1]
     bot.deposit = Math.ceil(monthlyExpenses(bot) / 0.009) + 1_000_000
+    bot.freedomStreak = 3
     game.phase = 'decision'
     game.pendingDecision = { kind: 'salary' }
 
@@ -465,14 +466,14 @@ describe('game engine', () => {
     expect(result.state.players[1].status).toBe('free')
   })
 
-  it('requires a three-month liquid reserve before declaring financial freedom', () => {
+  it('requires a three-month streak after all freedom conditions are met', () => {
     const game = startedGame()
     const player = game.players[0]
-    player.assets = Array.from({ length: 4 }, (_, index) => ({ ...testAsset('coffee', player.id), id: `coffee-${index}` }))
-    player.cash = 0
-    expect(passiveIncome(player, game.stockMarket)).toBeGreaterThanOrEqual(monthlyExpenses(player))
+    player.assets = []
+    player.bonds = Math.ceil(monthlyExpenses(player) / 0.014) + 1_000_000
+    player.freedomStreak = 2
     expect(isFinanciallyFree(player, game.stockMarket)).toBe(false)
-    player.cash = monthlyExpenses(player) * 3
+    player.freedomStreak = 3
     expect(isFinanciallyFree(player, game.stockMarket)).toBe(true)
   })
 

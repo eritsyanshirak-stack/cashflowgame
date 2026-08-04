@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { businesses, difficultySettings } from '../content/content'
 import type { Asset } from '../domain/types'
-import { assessLoan, isFinanciallyFree, monthlyExpenses, portfolioManagementCost } from '../systems/economy'
+import { assessLoan, isFinanciallyFree, loanPayment, monthlyExpenses, portfolioManagementCost } from '../systems/economy'
 import { emptyGame, executeCommand } from './engine'
 
 const startedGame = (seed = 101) =>
@@ -14,7 +14,7 @@ const testAsset = (businessId: string, ownerId: string, index: number): Asset =>
     id: `${business.id}-${index}`,
     ownerId,
     ownership: 1,
-    monthlyPayment: Math.round(business.loan * 0.015),
+    monthlyPayment: loanPayment(business.loan, business.loanAnnualRate, business.loanTermMonths),
     purchaseMonth: 1,
     developmentLevel: 0,
     developments: [],
@@ -37,10 +37,10 @@ describe('balance guardrails', () => {
     const player = game.players[0]
     const pickup = businesses.find((item) => item.id === 'pickup')!
     const projectedIncome = pickup.revenue - pickup.operatingCosts
-    const projectedPayment = Math.round(pickup.loan * 0.015)
+    const projectedPayment = loanPayment(pickup.loan, pickup.loanAnnualRate, pickup.loanTermMonths)
 
-    player.cash = 100_000
-    const modestGap = assessLoan(player, 80_000, 'normal', undefined, projectedIncome, projectedPayment)
+    player.cash = 150_000
+    const modestGap = assessLoan(player, 30_000, 'normal', undefined, projectedIncome, projectedPayment)
     expect(modestGap.approved).toBe(true)
 
     player.cash = 20_000
@@ -70,10 +70,10 @@ describe('balance guardrails', () => {
   it('adds management overhead when a player buys more businesses than they can control', () => {
     const game = startedGame()
     const player = game.players[0]
-    player.assets = Array.from({ length: 4 }, (_, index) => testAsset('coffee', player.id, index))
+    player.assets = Array.from({ length: 3 }, (_, index) => testAsset('coffee', player.id, index))
     expect(portfolioManagementCost(player)).toBe(0)
 
-    player.assets.push(testAsset('coffee', player.id, 5))
+    player.assets.push(testAsset('coffee', player.id, 4))
     expect(portfolioManagementCost(player)).toBeGreaterThan(0)
 
     player.skills.management = 200
@@ -85,6 +85,7 @@ describe('balance guardrails', () => {
     const player = game.players[0]
     player.deposit = 20_000_000
     player.cash = monthlyExpenses(player) * 3
+    player.freedomStreak = 3
     player.loans.push({
       id: 'debt-wall',
       name: 'Кредитная пирамида',

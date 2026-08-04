@@ -28,6 +28,8 @@ export interface BusinessTemplate {
   revenue: number
   operatingCosts: number
   requiredLevel: number
+  loanAnnualRate: number
+  loanTermMonths: number
 }
 
 export interface Asset extends BusinessTemplate {
@@ -42,6 +44,7 @@ export interface Asset extends BusinessTemplate {
   lastDevelopedMonth: number | null
   saleOffer: number | null
   offerExpiresMonth: number | null
+  performanceMultiplier?: number
 }
 
 export interface Loan {
@@ -101,6 +104,7 @@ export interface Player {
   skills: SkillProgress
   status: PlayerStatus
   eliminatedMonth: number | null
+  freedomStreak: number
   botStrategy?: BotStrategy
 }
 
@@ -145,7 +149,7 @@ export interface MonthlyReport {
 }
 
 export interface GameState {
-  version: 7
+  version: 8
   seed: number
   phase: Phase
   day: number

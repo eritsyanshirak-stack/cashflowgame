@@ -412,3 +412,14 @@ h1 em { -webkit-text-stroke-color: var(--acid); }
   .stats-grid .metric strong { font-size: 13px; }
   .tile > span { font-size: 15px; }
 }
+
+
+/* freedom checklist v1.2 */
+.freedom-checklist{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0 16px}
+.freedom-checklist span{display:grid;grid-template-columns:26px 1fr;grid-template-rows:auto auto;column-gap:8px;align-items:center;padding:10px 11px;border:1px solid rgba(20,62,51,.12);border-radius:14px;background:rgba(255,255,255,.52)}
+.freedom-checklist span>i{grid-row:1/3;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:#e7e2d8;color:#615d55;font-style:normal;font-weight:800;font-size:12px}
+.freedom-checklist span>b{font-size:12px;line-height:1.2;color:#282b2d}
+.freedom-checklist span>small{font-size:10px;line-height:1.2;color:#858a90;margin-top:2px}
+.freedom-checklist span.done{border-color:rgba(19,119,84,.25);background:rgba(224,243,234,.62)}
+.freedom-checklist span.done>i{background:#137754;color:white}
+@media(max-width:350px){.freedom-checklist{grid-template-columns:1fr}}

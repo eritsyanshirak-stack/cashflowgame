@@ -4,7 +4,7 @@ import './premium.css'
 import './tabletop.css'
 import { board, businesses, developments, difficultySettings, professions } from './game/content/content'
 import type { Decision, Difficulty, Funding, GameCommand, GameState, MonthlyReport, Player, SkillId } from './game/domain/types'
-import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, competitionStandings, freedomProgress, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, pledgedLoanForAsset, stockMarketValue, totalDebt } from './game/systems/economy'
+import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, competitionStandings, freedomProgress, freedomRequirements, loanPayment, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, pledgedLoanForAsset, stockMarketValue, totalDebt } from './game/systems/economy'
 import { hasSave } from './game/persistence/save'
 import { useGameStore } from './store/gameStore'
 import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
@@ -78,7 +78,8 @@ function GameScreen() {
   const previousEventId = useRef(game.events[0]?.id)
   const rollTimer = useRef<number | null>(null)
   const player = game.players[0]
-  const freedom = Math.min(100, Math.round((passiveIncome(player, game.stockMarket) / Math.max(1, monthlyExpenses(player))) * 100))
+  const freedom = freedomProgress(player, game.stockMarket, game.month)
+  const requirements = freedomRequirements(player, game.stockMarket, game.month)
   const report = game.lastMonthlyReport
   const level = playerLevel(player)
   const nextLevelXp = nextPlayerLevelXp(player)
@@ -120,11 +121,17 @@ function GameScreen() {
       <div className="level-row"><span>Уровень {level} · {rankName(level)}</span><strong>{nextLevelXp ? `${player.experience}/${nextLevelXp} XP` : 'MAX'}</strong></div>
       <div className="freedom-row"><span>Путь к свободе</span><strong>{freedom}%</strong></div>
       <div className="progress"><i style={{ width: `${freedom}%` }} /></div>
+      <div className="freedom-checklist">
+        <span className={requirements.incomeCovered ? 'done' : ''}><i>{requirements.incomeCovered ? '✓' : '1'}</i><b>Пассивный доход</b><small>{Math.round(requirements.incomeCoverage * 100)}% покрытия</small></span>
+        <span className={requirements.reserveReady ? 'done' : ''}><i>{requirements.reserveReady ? '✓' : '2'}</i><b>Резерв ×3</b><small>{requirements.reserveReady ? 'Собран' : `Не хватает ${money(requirements.reserveShortfall)}`}</small></span>
+        <span className={requirements.debtLoadReady && requirements.unsecuredDebtReady ? 'done' : ''}><i>{requirements.debtLoadReady && requirements.unsecuredDebtReady ? '✓' : '3'}</i><b>Безопасный долг</b><small>Платежи {Math.round(requirements.debtServiceLoad * 100)}%</small></span>
+        <span className={requirements.streakReady ? 'done' : ''}><i>{requirements.streakReady ? '✓' : '4'}</i><b>Удержать результат</b><small>{player.freedomStreak}/3 месяца</small></span>
+      </div>
       <div className="stats-grid">
         <Metric label="Деньги" value={money(player.cash)} />
         <Metric label="Капитал" value={money(netWorth(player, game.stockMarket))} />
-        <Metric label="Пассивный доход" value={`${money(passiveIncome(player, game.stockMarket))}/мес`} good />
-        <Metric label="Расходы" value={`${money(monthlyExpenses(player))}/мес`} bad />
+        <Metric label="Пассивный доход" value={`${money(passiveIncome(player, game.stockMarket, game.month))}/мес`} good />
+        <Metric label="Расходы" value={`${money(monthlyExpenses(player, game.month))}/мес`} bad />
       </div>
     </section>
 
@@ -154,7 +161,7 @@ function Board({ onRoll, rolling }: { onRoll: () => void; rolling: boolean }) {
   const game = useGameStore((store) => store.game)
   const player = game.players[0]
   const currentCell = board[player.position]
-  const boardFreedom = freedomProgress(player, game.stockMarket)
+  const boardFreedom = freedomProgress(player, game.stockMarket, game.month)
   const [visualPosition, setVisualPosition] = useState(player.position)
   const previousTarget = useRef(player.position)
 
@@ -193,7 +200,7 @@ function Board({ onRoll, rolling }: { onRoll: () => void; rolling: boolean }) {
     <button className={`roll-button ${rolling ? 'rolling' : ''}`} disabled={game.phase !== 'ready' || rolling} onClick={onRoll}>
       <span className={`cube dice-face dice-${game.lastRoll ?? 0}`} aria-hidden="true"><i /><i /><i /><i /><i /><i /></span><b>{rolling ? 'Кубик брошен...' : game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>{rolling ? 'Фишка движется по полю' : game.phase === 'ready' ? 'Испытай рынок' : 'Заверши событие этого хода'}</small>
     </button>
-    <div className="rivals">{competitionStandings(game.players, game.stockMarket).slice(0, 3).map((rival, index) => <div className={rival.id === player.id ? 'you' : rival.status} key={rival.id}><b>{index + 1}</b><span>{rival.name}<small>{rival.status === 'bankrupt' ? 'Выбыл' : `${freedomProgress(rival, game.stockMarket)}% · ${money(netWorth(rival, game.stockMarket))}`}</small></span></div>)}</div>
+    <div className="rivals">{competitionStandings(game.players, game.stockMarket, game.month).slice(0, 3).map((rival, index) => <div className={rival.id === player.id ? 'you' : rival.status} key={rival.id}><b>{index + 1}</b><span>{rival.name}<small>{rival.status === 'bankrupt' ? 'Выбыл' : `${freedomProgress(rival, game.stockMarket, game.month)}% · ${money(netWorth(rival, game.stockMarket))}`}</small></span></div>)}</div>
   </section>
 }
 
@@ -219,18 +226,18 @@ const strategyName = (player: Player) => !player.isBot ? 'Твоя страте�
 
 function Race() {
   const game = useGameStore((store) => store.game)
-  const standings = competitionStandings(game.players, game.stockMarket)
+  const standings = competitionStandings(game.players, game.stockMarket, game.month)
   return <section className="content-section">
     <div className="section-heading"><span className="eyebrow">КОНКУРЕНЦИЯ</span><h2>Гонка игроков</h2></div>
     <p className="race-intro">Побеждает тот, кто первым покроет расходы пассивным доходом и сохранит ликвидный резерв на три месяца. Разовый высокий капитал сам по себе свободы не даёт.</p>
     <div className="race-list">{standings.map((rival, index) => {
-      const progress = freedomProgress(rival, game.stockMarket)
-      const cashflow = monthlyCashflow(rival, game.stockMarket)
+      const progress = freedomProgress(rival, game.stockMarket, game.month)
+      const cashflow = passiveIncome(rival, game.stockMarket, game.month) - monthlyExpenses(rival, game.month)
       return <article className={`race-card ${rival.id === 'human' ? 'human' : ''} ${rival.status}`} key={rival.id}>
         <div className="race-rank">{rival.status === 'bankrupt' ? '×' : index + 1}</div>
         <div className="race-main"><div className="race-name"><span><b>{rival.name}</b><small>{strategyName(rival)} · уровень {playerLevel(rival)}</small></span><strong>{rival.status === 'free' ? 'Свобода' : rival.status === 'bankrupt' ? 'Банкрот' : `${progress}%`}</strong></div>
           <div className="race-progress"><i style={{ width: `${Math.min(100, progress)}%` }} /></div>
-          <div className="race-facts"><span>Капитал <b>{money(netWorth(rival, game.stockMarket))}</b></span><span>Поток <b className={cashflow >= 0 ? 'good' : 'bad'}>{cashflow >= 0 ? '+' : ''}{money(cashflow)}</b></span><span>Долг <b>{money(totalDebt(rival))}</b></span><span>Активы <b>{rival.assets.length + rival.stocks.length}</b></span></div>
+          <div className="race-facts"><span>Капитал <b>{money(netWorth(rival, game.stockMarket))}</b></span><span>Пассивный разрыв <b className={cashflow >= 0 ? 'good' : 'bad'}>{cashflow >= 0 ? '+' : ''}{money(cashflow)}</b></span><span>Долг <b>{money(totalDebt(rival))}</b></span><span>Активы <b>{rival.assets.length + rival.stocks.length}</b></span></div>
         </div>
       </article>
     })}</div>
@@ -243,7 +250,7 @@ function Assets() {
   const player = game.players[0]
   return <section className="content-section">
     <div className="section-heading"><span className="eyebrow">ПОРТФЕЛЬ</span><h2>Твои активы</h2></div>
-    <div className="summary-line"><span>Денежный поток</span><strong className={monthlyCashflow(player, game.stockMarket) >= 0 ? 'good' : 'bad'}>{money(monthlyCashflow(player, game.stockMarket))}/мес</strong></div>
+    <div className="summary-line"><span>Денежный поток</span><strong className={monthlyCashflow(player, game.stockMarket, game.month) >= 0 ? 'good' : 'bad'}>{money(monthlyCashflow(player, game.stockMarket, game.month))}/мес</strong></div>
     <div className="summary-line"><span>Общий долг</span><strong>{money(totalDebt(player))}</strong></div>
     <div className="skill-panel"><div className="portfolio-heading"><span><small>НАВЫКИ</small><b>Уровень {playerLevel(player)} · {rankName(playerLevel(player))}</b></span><strong>{player.experience} XP</strong></div><div className="skill-grid">{(Object.keys(skillDefinitions) as SkillId[]).map((skillId) => {
       const definition = skillDefinitions[skillId]
@@ -252,7 +259,7 @@ function Assets() {
       return <div key={skillId}><span>{definition.icon}</span><b>{definition.name}</b><small>{level}/3{next ? ` · ${player.skills[skillId]}/${next}` : ' · MAX'}</small></div>
     })}</div></div>
     {player.assets.length === 0 ? <div className="empty-state"><span>◇</span><h3>Активов пока нет</h3><p>Ищи сделки с положительным потоком. Цена сама по себе ничего не говорит.</p></div> : player.assets.map((asset) => <article className="asset-card asset-card-detailed" key={asset.id}>
-      <div className="asset-main"><div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}%</small><h3>{asset.name}</h3><strong className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес</strong></div></div>
+      <div className="asset-main"><div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}%</small><h3>{asset.name}</h3><strong className={assetCashflow(asset, game.month) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset, game.month))}/мес</strong></div></div>
       {pledgedLoanForAsset(player, asset.id) && <div className="pledge-badge">В залоге у банка · остаток {money(pledgedLoanForAsset(player, asset.id)!.balance)}</div>}
       <div className="asset-facts"><span>Рыночная стоимость <b>{money(assetMarketValue(asset))}</b></span><span>Долг самого бизнеса <b>{money(asset.loan)}</b></span><span>Уровень развития <b>{asset.developmentLevel}/4</b></span><span>Получишь после банков <b>{money(assetLiquidationProceeds(player, asset))}</b></span></div>
       {asset.saleOffer && asset.offerExpiresMonth === game.month && <div className="sale-offer"><div><small>ПРЕДЛОЖЕНИЕ ДО КОНЦА МЕСЯЦА</small><strong>{money(asset.saleOffer)}</strong></div><button disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'ACCEPT_SALE_OFFER', assetId: asset.id })}>Принять</button></div>}
@@ -312,7 +319,7 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
 
   if (decision.kind === 'business') {
     const business = businesses.find((item) => item.id === decision.businessId)!
-    const payment = Math.round(business.loan * 0.015)
+    const payment = loanPayment(business.loan, business.loanAnnualRate, business.loanTermMonths)
     const flow = business.revenue - business.operatingCosts - payment
     const downPayment = Math.max(0, decision.askingPrice - business.loan)
     const gap = Math.max(0, downPayment - player.cash)
@@ -353,20 +360,20 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const cost = trainingCost(player, skillId)
     return <button key={skillId} disabled={level >= 3 || player.cash < cost} onClick={() => dispatch({ type: 'TRAIN', skillId })}><span>{definition.icon}</span><div><b>{definition.name} · {level}/3</b><small>{definition.description}</small></div><strong>{level >= 3 ? 'MAX' : money(cost)}</strong></button>
   })}</div>{commonSkip}</>
-  else body = <><span className="eyebrow">РАСЧЁТ</span><h2>Финансовая пауза</h2><p>Текущий денежный поток: <strong>{money(monthlyCashflow(player, game.stockMarket))}/мес</strong></p>{commonSkip}</>
+  else body = <><span className="eyebrow">РАСЧЁТ</span><h2>Финансовая пауза</h2><p>Текущий денежный поток: <strong>{money(monthlyCashflow(player, game.stockMarket, game.month))}/мес</strong></p>{commonSkip}</>
 
   return <div className="sheet-backdrop"><section className={`decision-sheet decision-${decision.kind}`}><div className="sheet-handle" />{body}</section></div>
 }
 
 function GameResult({ game, onReset }: { game: GameState; onReset: () => void }) {
-  const standings = competitionStandings(game.players, game.stockMarket)
+  const standings = competitionStandings(game.players, game.stockMarket, game.month)
   const winner = game.players.find((player) => player.id === game.outcome?.winnerId)
   const humanWon = winner?.id === 'human'
   const title = humanWon ? 'Ты выиграл гонку' : winner ? `${winner.name} победил` : 'Ты обанкротился'
   const description = game.outcome?.reason === 'freedom'
-    ? `${winner?.name ?? 'Игрок'} первым покрыл расходы пассивным доходом.`
+    ? `${winner?.name ?? 'Игрок'} выполнил все условия свободы и удержал их три месяца.`
     : game.outcome?.reason === 'last-solvent' ? `${winner?.name ?? 'Игрок'} остался последним платёжеспособным участником.` : 'Долги, отрицательный капитал и кассовый разрыв остановили твою игру.'
-  return <div className="sheet-backdrop victory"><section className="decision-sheet result-sheet"><div className="victory-mark">{humanWon ? '₽' : '×'}</div><span className="eyebrow">ИТОГИ · МЕСЯЦ {game.month}</span><h2>{title}</h2><p>{description}</p><div className="final-standings">{standings.map((player, index) => <div key={player.id}><b>{player.status === 'bankrupt' ? '×' : index + 1}</b><span>{player.name}<small>{player.status === 'bankrupt' ? 'Банкрот' : `${freedomProgress(player, game.stockMarket)}% пути к свободе`}</small></span><strong>{money(netWorth(player, game.stockMarket))}</strong></div>)}</div><button className="primary-action" onClick={onReset}>Сыграть ещё раз</button></section></div>
+  return <div className="sheet-backdrop victory"><section className="decision-sheet result-sheet"><div className="victory-mark">{humanWon ? '₽' : '×'}</div><span className="eyebrow">ИТОГИ · МЕСЯЦ {game.month}</span><h2>{title}</h2><p>{description}</p><div className="final-standings">{standings.map((player, index) => <div key={player.id}><b>{player.status === 'bankrupt' ? '×' : index + 1}</b><span>{player.name}<small>{player.status === 'bankrupt' ? 'Банкрот' : `${freedomProgress(player, game.stockMarket, game.month)}% пути к свободе`}</small></span><strong>{money(netWorth(player, game.stockMarket))}</strong></div>)}</div><button className="primary-action" onClick={onReset}>Сыграть ещё раз</button></section></div>
 }
 
 export default function App() {

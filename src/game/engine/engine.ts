@@ -1,10 +1,10 @@
 import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, initialStockMarket, marketHeadlines, professions } from '../content/content'
 import type { Asset, BotStrategy, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
-import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBankrupt, isFinanciallyFree, loanPayment, pledgedLoanForAsset } from '../systems/economy'
+import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBankrupt, isFinanciallyFree, loanPayment, meetsFreedomConditions, monthlyExpenses, pledgedLoanForAsset } from '../systems/economy'
 import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, trainingCost } from '../systems/progression'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 7,
+  version: 8,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -59,6 +59,7 @@ const makePlayer = (professionId: string, name: string, isBot: boolean, index: n
     skills: emptySkills(),
     status: 'active',
     eliminatedMonth: null,
+    freedomStreak: 0,
     botStrategy: isBot ? botStrategies[(index - 1) % botStrategies.length] : undefined,
   }
 }
@@ -96,13 +97,32 @@ const updateAssetMarket = (state: GameState, player: Player) => {
       asset.saleOffer = Math.round(asset.marketValue * premium)
       asset.offerExpiresMonth = state.month + 1
     }
-    asset.loan = Math.max(0, asset.loan - Math.round(asset.monthlyPayment * 0.7))
-    asset.monthlyPayment = asset.loan > 0 ? Math.min(asset.monthlyPayment, Math.round(asset.loan * 0.03)) : 0
+
+    const performanceFloor = state.difficulty === 'easy' ? 0.9 : state.difficulty === 'normal' ? 0.78 : 0.65
+    const performanceCeiling = state.difficulty === 'easy' ? 1.12 : state.difficulty === 'normal' ? 1.15 : 1.22
+    const qualityBonus = Math.min(0.08, asset.developmentLevel * 0.018)
+    asset.performanceMultiplier = Math.min(1.3, performanceFloor + random(state) * (performanceCeiling - performanceFloor) + qualityBonus)
+    if (!player.isBot && asset.performanceMultiplier < 0.82) {
+      addEvent(state, 'Слабый месяц бизнеса', `${asset.name}: спрос просел, выручка ниже плана.`, 'bad')
+    } else if (!player.isBot && asset.performanceMultiplier > 1.12) {
+      addEvent(state, 'Сильный месяц бизнеса', `${asset.name}: продажи превысили ожидания.`, 'good')
+    }
+
+    if (asset.loan > 0) {
+      const annualRate = asset.loanAnnualRate || 0.22
+      const monthlyInterest = Math.round(asset.loan * annualRate / 12)
+      const principalPayment = Math.max(0, asset.monthlyPayment - monthlyInterest)
+      asset.loan = Math.max(0, asset.loan - principalPayment)
+      asset.loanTermMonths = Math.max(0, asset.loanTermMonths - 1)
+      asset.monthlyPayment = asset.loan > 0 ? loanPayment(asset.loan, annualRate, Math.max(1, asset.loanTermMonths)) : 0
+    }
   })
   player.loans.forEach((loan) => {
-    loan.balance = Math.max(0, loan.balance - Math.round(loan.monthlyPayment * 0.72))
+    const interest = Math.round(loan.balance * loan.annualRate / 12)
+    const principalPayment = Math.max(0, loan.monthlyPayment - interest)
+    loan.balance = Math.max(0, loan.balance - principalPayment)
     loan.termMonths = Math.max(0, loan.termMonths - 1)
-    loan.monthlyPayment = loan.balance > 0 ? Math.min(loan.monthlyPayment, loanPayment(loan.balance, loan.annualRate, Math.max(1, loan.termMonths))) : 0
+    loan.monthlyPayment = loan.balance > 0 ? loanPayment(loan.balance, loan.annualRate, Math.max(1, loan.termMonths)) : 0
   })
   player.loans = player.loans.filter((loan) => loan.balance > 0)
 }
@@ -157,6 +177,10 @@ const settleMonth = (state: GameState) => {
   updateStockMarket(state)
   state.month = nextMonth
   state.day = 1
+  state.players.forEach((player) => {
+    if (player.status !== 'active') return
+    player.freedomStreak = meetsFreedomConditions(player, state.stockMarket, state.month) ? player.freedomStreak + 1 : 0
+  })
   state.lastMonthlyReport = humanReport
   addEvent(state, 'Итоги месяца', `Чистый результат: ${humanReport.netCashflow.toLocaleString('ru-RU')} ₽`, humanReport.netCashflow >= 0 ? 'good' : 'bad')
 }
@@ -183,7 +207,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     const collateral = funding === 'secured' ? player.assets.find((asset) => asset.id === collateralAssetId) : undefined
     if (funding === 'secured' && !collateral) return null
     const projectedIncome = Math.round((business.revenue - business.operatingCosts) * ownership)
-    const projectedAssetPayment = Math.round(business.loan * ownership * 0.015)
+    const projectedAssetPayment = loanPayment(Math.round(business.loan * ownership), business.loanAnnualRate, business.loanTermMonths)
     const assessment = assessLoan(player, acquisitionGap, state.difficulty, collateral, projectedIncome, projectedAssetPayment)
     if (!assessment.approved) return null
     player.loans.push({
@@ -209,8 +233,9 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     loan: assetLoan,
     revenue: Math.round(business.revenue * ownership),
     operatingCosts: Math.round(business.operatingCosts * ownership),
-    monthlyPayment: Math.round(assetLoan * 0.015),
+    monthlyPayment: loanPayment(assetLoan, business.loanAnnualRate, business.loanTermMonths),
     purchaseMonth: state.month,
+    performanceMultiplier: 1,
     developmentLevel: 0,
     developments: [],
     totalDevelopmentCost: 0,
@@ -236,9 +261,25 @@ const applyDevelopment = (asset: Asset, developmentId: string, cost: number, mar
 const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   const collateralLoan = pledgedLoanForAsset(player, asset.id)
   const collateralDebt = collateralLoan?.balance ?? 0
+  const assetDebtPayment = Math.min(grossPrice, asset.loan)
+  const assetDebtShortfall = Math.max(0, asset.loan - grossPrice)
   const equityBeforeCollateral = Math.max(0, grossPrice - asset.loan)
   const collateralPayment = Math.min(equityBeforeCollateral, collateralDebt)
   const proceeds = equityBeforeCollateral - collateralPayment
+
+  if (assetDebtShortfall > 0) {
+    const annualRate = 0.29
+    const termMonths = 36
+    player.loans.push({
+      id: `shortfall-${asset.id}`,
+      name: `Остаток долга: ${asset.name}`,
+      balance: assetDebtShortfall,
+      monthlyPayment: loanPayment(assetDebtShortfall, annualRate, termMonths),
+      annualRate,
+      termMonths,
+    })
+  }
+
   if (collateralLoan) {
     collateralLoan.balance -= collateralPayment
     collateralLoan.collateralAssetId = undefined
@@ -247,7 +288,7 @@ const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   }
   player.cash += proceeds
   player.assets = player.assets.filter((item) => item.id !== asset.id)
-  return { proceeds, collateralPayment }
+  return { proceeds, collateralPayment, assetDebtPayment, assetDebtShortfall }
 }
 
 const awardProgress = (state: GameState, player: Player, experience: number, skillId?: Parameters<typeof grantProgress>[2], skillPoints = 0) => {
@@ -273,10 +314,9 @@ const runBots = (state: GameState) => {
 
     for (const asset of bot.assets.slice()) {
       const offerPremium = asset.saleOffer ? asset.saleOffer / Math.max(1, assetMarketValue(asset)) : 0
-      const weakAsset = assetCashflow(asset) < 0
+      const weakAsset = assetCashflow(asset, state.month) < 0
       if ((offerPremium > (strategy === 'aggressive' ? 1.16 : 1.08) || weakAsset) && random(state) < settings.botActivity) {
-        bot.cash += Math.max(0, (asset.saleOffer ?? assetMarketValue(asset)) - asset.loan)
-        bot.assets = bot.assets.filter((item) => item.id !== asset.id)
+        sellAsset(bot, asset, asset.saleOffer ?? assetMarketValue(asset))
         addEvent(state, 'Соперник продал актив', `${bot.name} вышел из ${asset.name}`)
       }
     }
@@ -298,19 +338,40 @@ const runBots = (state: GameState) => {
 
     if (cell.type === 'business' && random(state) < settings.botActivity * risk) {
       const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(bot))
-      const business = pick(state, unlocked)
-      const payment = Math.round(business.loan * 0.015)
-      const profitable = business.revenue - business.operatingCosts - payment > 0
-      const reserve = bot.baseExpenses * (strategy === 'careful' ? 1 : strategy === 'aggressive' ? 0.15 : 0.5)
-      if (profitable && bot.cash > business.downPayment * 0.3 + reserve) {
-        const funding: Funding = bot.cash >= business.downPayment + reserve ? 'cash' : bot.cash >= business.downPayment * 0.5 + reserve ? 'partner50' : 'credit'
-        const discount = random(state) < settings.negotiationChance * 0.45 ? 0.92 : 1
+      const ranked = unlocked
+        .map((business) => {
+          const payment = loanPayment(business.loan, business.loanAnnualRate, business.loanTermMonths)
+          const flow = business.revenue - business.operatingCosts - payment
+          return { business, flow, score: flow / Math.max(1, business.downPayment) }
+        })
+        .filter((item) => item.flow > 0)
+        .sort((a, b) => b.score - a.score)
+      const shortlist = ranked.slice(0, Math.max(1, Math.min(4, ranked.length)))
+      const selected = shortlist[Math.floor(random(state) * shortlist.length)]
+      const business = selected?.business
+      const reserve = monthlyExpenses(bot, state.month) * (strategy === 'careful' ? 1.5 : strategy === 'aggressive' ? 0.5 : 1)
+      if (business && bot.cash > business.downPayment * 0.35 + reserve) {
+        const funding: Funding = bot.cash >= business.downPayment + reserve
+          ? 'cash'
+          : bot.cash >= business.downPayment * 0.5 + reserve
+            ? 'partner50'
+            : 'credit'
+        const discount = random(state) < settings.negotiationChance * 0.6 ? 0.92 : 1
         const asset = makeAsset(state, bot, business.id, funding, Math.round(business.price * discount))
         if (asset) {
           bot.assets.push(asset)
-          awardProgress(state, bot, 55, 'finance', 8)
+          awardProgress(state, bot, 65, 'finance', 10)
           addEvent(state, 'Ход соперника', `${bot.name} купил ${business.name}${discount < 1 ? ' после торга' : ''}`)
         }
+      }
+    }
+    if (cell.type === 'growth' && random(state) < settings.botActivity * 0.75) {
+      const skillId = strategy === 'careful' ? 'finance' : strategy === 'aggressive' ? 'marketing' : bot.assets.length >= 3 ? 'management' : 'finance'
+      const cost = trainingCost(bot, skillId)
+      const reserve = monthlyExpenses(bot, state.month) * (strategy === 'careful' ? 1.5 : 0.75)
+      if (bot.cash > cost + reserve && skillLevel(bot, skillId) < 3) {
+        bot.cash -= cost
+        awardProgress(state, bot, 65, skillId, 45)
       }
     }
     if (cell.type === 'expense') bot.cash -= pick(state, expenseCards)[1]
@@ -351,12 +412,12 @@ const finishGame = (state: GameState, winnerId: string | null, reason: NonNullab
 const evaluateCompetition = (state: GameState) => {
   for (const player of state.players) {
     if (player.status !== 'active') continue
-    if (isFinanciallyFree(player, state.stockMarket)) {
+    if (isFinanciallyFree(player, state.stockMarket, state.month)) {
       player.status = 'free'
       finishGame(state, player.id, 'freedom')
       return
     }
-    if (isBankrupt(player, state.stockMarket)) {
+    if (isBankrupt(player, state.stockMarket, state.month)) {
       player.status = 'bankrupt'
       player.eliminatedMonth = state.month
       addEvent(state, 'Банкротство', `${player.name} выбыл из гонки.`, player.isBot ? 'neutral' : 'bad')
@@ -396,7 +457,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const botNames = ['Алексей', 'Марина', 'Денис']
     for (let index = 0; index < botCount; index += 1) started.players.push(makePlayer(botProfessions[index % botProfessions.length].id, botNames[index], true, index + 1))
     started.phase = 'ready'
-    addEvent(started, 'Партия началась', 'Цель - покрыть расходы пассивным доходом.', 'good')
+    addEvent(started, 'Партия началась', 'Цель — выполнить все условия свободы и удержать их три месяца подряд.', 'good')
     return { state: started, accepted: true }
   }
 
