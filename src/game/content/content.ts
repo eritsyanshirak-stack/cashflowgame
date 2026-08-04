@@ -1,4 +1,24 @@
-import type { BusinessTemplate, CellType, Profession } from '../domain/types'
+import type { BusinessTemplate, CellType, Difficulty, Profession } from '../domain/types'
+
+export const difficultySettings: Record<Difficulty, {
+  label: string
+  description: string
+  negotiationChance: number
+  marketVolatility: number
+  offerChance: number
+  botActivity: number
+}> = {
+  easy: { label: 'Спокойно', description: 'Рынок мягче, торг проще', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48 },
+  normal: { label: 'Баланс', description: 'Честная конкуренция', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.68 },
+  hard: { label: 'Жёстко', description: 'Сильные боты и нервный рынок', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86 },
+}
+
+export const developments = [
+  { id: 'marketing', name: 'Маркетинг', description: 'Больше клиентов и выручки', costRate: 0.08, revenueRate: 0.16, costGrowthRate: 0.04, valueRate: 0.12 },
+  { id: 'automation', name: 'Автоматизация', description: 'Меньше ручных расходов', costRate: 0.11, revenueRate: 0.05, costGrowthRate: -0.12, valueRate: 0.15 },
+  { id: 'manager', name: 'Управляющий', description: 'Стабильнее и дороже бизнес', costRate: 0.14, revenueRate: 0.12, costGrowthRate: 0.03, valueRate: 0.2 },
+  { id: 'scale', name: 'Вторая точка', description: 'Большой рост с большими расходами', costRate: 0.28, revenueRate: 0.42, costGrowthRate: 0.24, valueRate: 0.38 },
+] as const
 
 export const professions: Profession[] = [
   { id: 'trainer', name: 'Фитнес-тренер', cash: 150_000, salary: 180_000, expenses: 128_000, debt: 380_000 },

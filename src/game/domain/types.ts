@@ -1,6 +1,8 @@
 export type PlayerId = string
 export type Phase = 'setup' | 'ready' | 'decision' | 'victory'
 export type CellType = 'salary' | 'business' | 'market' | 'expense' | 'chance' | 'bank' | 'growth'
+export type Difficulty = 'easy' | 'normal' | 'hard'
+export type BotStrategy = 'careful' | 'balanced' | 'aggressive'
 
 export interface Profession {
   id: string
@@ -29,6 +31,12 @@ export interface Asset extends BusinessTemplate {
   marketValue?: number
   monthlyPayment: number
   purchaseMonth: number
+  developmentLevel: number
+  developments: string[]
+  totalDevelopmentCost: number
+  lastDevelopedMonth: number | null
+  saleOffer: number | null
+  offerExpiresMonth: number | null
 }
 
 export interface Loan {
@@ -52,10 +60,11 @@ export interface Player {
   loans: Loan[]
   deposit: number
   bonds: number
+  botStrategy?: BotStrategy
 }
 
 export type Decision =
-  | { kind: 'business'; businessId: string }
+  | { kind: 'business'; businessId: string; askingPrice: number; negotiated: boolean; negotiationNote?: string }
   | { kind: 'expense'; title: string; amount: number }
   | { kind: 'chance'; title: string; investment: number; returnAmount: number }
   | { kind: 'market'; title: string; description: string }
@@ -88,7 +97,7 @@ export interface MonthlyReport {
 }
 
 export interface GameState {
-  version: 2
+  version: 3
   seed: number
   phase: Phase
   day: number
@@ -100,15 +109,21 @@ export interface GameState {
   pendingDecision: Decision | null
   events: GameEvent[]
   lastMonthlyReport: MonthlyReport | null
+  difficulty: Difficulty
 }
 
 export type Funding = 'cash' | 'credit' | 'partner30' | 'partner50'
 
 export type GameCommand =
-  | { type: 'START_GAME'; professionId: string; botCount?: number; seed?: number }
+  | { type: 'START_GAME'; professionId: string; botCount?: number; difficulty?: Difficulty; seed?: number }
   | { type: 'ROLL_DICE' }
+  | { type: 'NEGOTIATE_BUSINESS'; offerPercent: 0.85 | 0.9 | 0.95 }
   | { type: 'BUY_BUSINESS'; funding: Funding }
   | { type: 'SELL_ASSET'; assetId: string }
+  | { type: 'ACCEPT_SALE_OFFER'; assetId: string }
+  | { type: 'DEVELOP_ASSET'; assetId: string; developmentId: string }
+  | { type: 'BUY_PARTNER_SHARE'; assetId: string }
+  | { type: 'SELL_PARTNER_SHARE'; assetId: string }
   | { type: 'SKIP_DECISION' }
   | { type: 'PAY_EXPENSE'; withCredit?: boolean }
   | { type: 'TAKE_CHANCE' }

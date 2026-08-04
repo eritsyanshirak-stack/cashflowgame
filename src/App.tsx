@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import './App.css'
 import './premium.css'
-import { board, businesses, professions } from './game/content/content'
-import type { Decision, Funding, GameCommand, MonthlyReport } from './game/domain/types'
+import { board, businesses, developments, difficultySettings, professions } from './game/content/content'
+import type { Decision, Difficulty, Funding, GameCommand, MonthlyReport } from './game/domain/types'
 import { assetCashflow, assetMarketValue, assetSaleProceeds, monthlyCashflow, monthlyExpenses, netWorth, passiveIncome, totalDebt } from './game/systems/economy'
 import { hasSave } from './game/persistence/save'
 import { useGameStore } from './store/gameStore'
@@ -11,6 +11,8 @@ const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} �
 
 function SetupScreen() {
   const [professionId, setProfessionId] = useState('trainer')
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal')
+  const [botCount, setBotCount] = useState(2)
   const dispatch = useGameStore((store) => store.dispatch)
   const continueGame = useGameStore((store) => store.continueGame)
   const profession = professions.find((item) => item.id === professionId) ?? professions[0]
@@ -35,7 +37,11 @@ function SetupScreen() {
         <Metric label="Расходы" value={`${money(profession.expenses)}/мес`} />
         <Metric label="Долг" value={money(profession.debt)} bad />
       </div>
-      <button className="primary-action" onClick={() => dispatch({ type: 'START_GAME', professionId, botCount: 2 })}>
+      <div className="setup-option"><label>Уровень сложности</label><div className="choice-row difficulty-row">
+        {(Object.keys(difficultySettings) as Difficulty[]).map((level) => <button key={level} className={difficulty === level ? 'selected' : ''} onClick={() => setDifficulty(level)}><b>{difficultySettings[level].label}</b><small>{difficultySettings[level].description}</small></button>)}
+      </div></div>
+      <div className="setup-option compact"><label>Соперники</label><div className="stepper"><button onClick={() => setBotCount(Math.max(1, botCount - 1))}>−</button><strong>{botCount} бота</strong><button onClick={() => setBotCount(Math.min(3, botCount + 1))}>+</button></div></div>
+      <button className="primary-action" onClick={() => dispatch({ type: 'START_GAME', professionId, botCount, difficulty })}>
         Начать новую игру <span>→</span>
       </button>
       {hasSave() && <button className="ghost-action" onClick={continueGame}>Продолжить сохранённую партию</button>}
@@ -111,7 +117,7 @@ function Board({ onRoll }: { onRoll: () => void }) {
       <span className="cube">⌁</span><b>{game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>Ход нельзя отменить</small>
     </button>
     <div className="rivals">
-      {game.players.slice(1).map((bot) => <div key={bot.id}><i /> <span>{bot.name}<small>{money(netWorth(bot))}</small></span></div>)}
+      {game.players.slice(1).map((bot) => <div key={bot.id}><i /> <span>{bot.name}<small>{bot.botStrategy === 'careful' ? 'Осторожный' : bot.botStrategy === 'aggressive' ? 'Агрессивный' : 'Сбалансированный'} · {money(netWorth(bot))}</small></span></div>)}
     </div>
   </section>
 }
@@ -126,8 +132,14 @@ function Assets() {
     <div className="summary-line"><span>Общий долг</span><strong>{money(totalDebt(player))}</strong></div>
     {player.assets.length === 0 ? <div className="empty-state"><span>◇</span><h3>Активов пока нет</h3><p>Ищи сделки с положительным потоком. Цена сама по себе ничего не говорит.</p></div> : player.assets.map((asset) => <article className="asset-card asset-card-detailed" key={asset.id}>
       <div className="asset-main"><div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}%</small><h3>{asset.name}</h3><strong className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес</strong></div></div>
-      <div className="asset-facts"><span>Рыночная стоимость <b>{money(assetMarketValue(asset))}</b></span><span>Остаток долга <b>{money(asset.loan)}</b></span><span>Получишь при продаже <b>{money(assetSaleProceeds(asset))}</b></span></div>
-      <button className="sell-button" disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'SELL_ASSET', assetId: asset.id })}>Продать актив</button>
+      <div className="asset-facts"><span>Рыночная стоимость <b>{money(assetMarketValue(asset))}</b></span><span>Остаток долга <b>{money(asset.loan)}</b></span><span>Уровень развития <b>{asset.developmentLevel}/4</b></span><span>Получишь при продаже <b>{money(assetSaleProceeds(asset))}</b></span></div>
+      {asset.saleOffer && asset.offerExpiresMonth === game.month && <div className="sale-offer"><div><small>ПРЕДЛОЖЕНИЕ ДО КОНЦА МЕСЯЦА</small><strong>{money(asset.saleOffer)}</strong></div><button disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'ACCEPT_SALE_OFFER', assetId: asset.id })}>Принять</button></div>}
+      <div className="development-list">{developments.filter((item) => !asset.developments.includes(item.id)).map((item) => {
+        const cost = Math.round(asset.price * asset.ownership * item.costRate)
+        return <button key={item.id} disabled={game.phase !== 'ready' || asset.lastDevelopedMonth === game.month || player.cash < cost} onClick={() => dispatch({ type: 'DEVELOP_ASSET', assetId: asset.id, developmentId: item.id })}><span><b>{item.name}</b><small>{item.description}</small></span><strong>{money(cost)}</strong></button>
+      })}</div>
+      <div className="partner-actions"><span>{asset.ownership < 1 ? `Партнёр владеет ${Math.round((1 - asset.ownership) * 100)}%` : 'Ты единственный владелец'}</span><button disabled={game.phase !== 'ready' || asset.ownership >= 1} onClick={() => dispatch({ type: 'BUY_PARTNER_SHARE', assetId: asset.id })}>Выкупить 10%</button><button disabled={game.phase !== 'ready' || asset.ownership <= 0.5} onClick={() => dispatch({ type: 'SELL_PARTNER_SHARE', assetId: asset.id })}>Продать 10%</button></div>
+      <button className="sell-button" disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'SELL_ASSET', assetId: asset.id })}>Продать по рынку</button>
     </article>)}
     <div className="saving-card"><Metric label="Депозит" value={money(player.deposit)} /><Metric label="Облигации" value={money(player.bonds)} /></div>
   </section>
@@ -168,9 +180,12 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const business = businesses.find((item) => item.id === decision.businessId)!
     const payment = Math.round(business.loan * 0.015)
     const flow = business.revenue - business.operatingCosts - payment
+    const downPayment = Math.max(0, decision.askingPrice - business.loan)
     const buy = (funding: Funding) => dispatch({ type: 'BUY_BUSINESS', funding })
     body = <><div className="deal-title"><span>{business.icon}</span><div><small>{business.category}</small><h2>{business.name}</h2></div></div>
-      <div className="deal-grid"><Metric label="Цена" value={money(business.price)} /><Metric label="Первый взнос" value={money(business.downPayment)} /><Metric label="Долг бизнеса" value={money(business.loan)} /><Metric label="Чистый поток" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
+      <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(downPayment)} /><Metric label="Долг бизнеса" value={money(business.loan)} /><Metric label="Чистый поток" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
+      {!decision.negotiated && <div className="negotiation"><div><b>Попробовать торг</b><small>Чем ниже цена, тем выше шанс потерять сделку</small></div><div><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })}>−5%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.9 })}>−10%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.85 })}>−15%</button></div></div>}
+      {decision.negotiationNote && <div className="negotiation-note">{decision.negotiationNote}</div>}
       <div className="cash-check"><span>У тебя сейчас</span><strong>{money(player.cash)}</strong></div>
       <button className="primary-action" onClick={() => buy('cash')}>Купить за свои <span>→</span></button>
       <div className="split-actions"><button onClick={() => buy('credit')}>Добавить кредит</button><button onClick={() => buy('partner30')}>Партнёр 30%</button><button onClick={() => buy('partner50')}>Партнёр 50%</button></div>{commonSkip}</>

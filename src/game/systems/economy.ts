@@ -27,7 +27,7 @@ export const totalDebt = (player: Player) =>
 
 export const netWorth = (player: Player) =>
   player.cash + player.deposit + player.bonds +
-  player.assets.reduce((sum, asset) => sum + asset.price * asset.ownership - asset.loan, 0) -
+  player.assets.reduce((sum, asset) => sum + assetMarketValue(asset) - asset.loan, 0) -
   player.baseDebt - player.loans.reduce((sum, loan) => sum + loan.balance, 0)
 
 export const isFinanciallyFree = (player: Player) =>
