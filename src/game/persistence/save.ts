@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { GameState } from '../domain/types'
 
 const saveSchema = z.object({
-  version: z.literal(7),
+  version: z.literal(8),
   seed: z.number().int().nonnegative(),
   phase: z.enum(['setup', 'ready', 'decision', 'finished']),
   day: z.number().int().min(1).max(30),
@@ -18,7 +18,7 @@ const saveSchema = z.object({
     experience: z.number().int().nonnegative(),
     skills: z.object({ negotiation: z.number().nonnegative(), marketing: z.number().nonnegative(), management: z.number().nonnegative(), finance: z.number().nonnegative(), brand: z.number().nonnegative() }),
     status: z.enum(['active', 'free', 'bankrupt']), eliminatedMonth: z.number().int().positive().nullable(),
-    botStrategy: z.enum(['careful', 'balanced', 'aggressive']).optional(),
+    botStrategy: z.enum(['careful', 'balanced', 'aggressive']).optional(), freedomStreak: z.number().int().nonnegative().optional(), restructuringUsed: z.boolean().optional(),
   })).min(1),
   pendingDecision: z.unknown().nullable(),
   events: z.array(z.unknown()),
@@ -34,7 +34,7 @@ const saveSchema = z.object({
   outcome: z.object({ winnerId: z.string().nullable(), reason: z.enum(['freedom', 'human-bankrupt', 'last-solvent']) }).nullable(),
 })
 
-export const SAVE_KEY = 'vyhod-iz-kruga-save-v7'
+export const SAVE_KEY = 'vyhod-iz-kruga-save-v8-risk'
 
 export const saveGame = (state: GameState) => localStorage.setItem(SAVE_KEY, JSON.stringify(state))
 

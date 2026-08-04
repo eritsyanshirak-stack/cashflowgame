@@ -2,8 +2,19 @@ import { difficultySettings } from '../content/content'
 import type { Asset, Difficulty, MonthlyReport, Player, PlayerStatus, StockQuote } from '../domain/types'
 import { skillLevel } from './progression'
 
+export const assetRevenueMultiplier = (asset: Asset) => {
+  if (asset.status === 'suspended') return 0
+  if (asset.status === 'stressed') return 0.62
+  const launch = asset.launchMonthsRemaining ?? 0
+  if (asset.status === 'launching' || launch > 0) return launch >= 2 ? 0.55 : 0.8
+  return 1
+}
+
+export const effectiveAssetRevenue = (asset: Asset) =>
+  Math.round(asset.revenue * assetRevenueMultiplier(asset))
+
 export const assetCashflow = (asset: Asset) =>
-  asset.revenue - asset.operatingCosts - asset.monthlyPayment
+  effectiveAssetRevenue(asset) - asset.operatingCosts - asset.monthlyPayment
 
 export const assetMarketValue = (asset: Asset) =>
   asset.marketValue ?? Math.round(asset.price * asset.ownership)
@@ -24,11 +35,11 @@ export const monthlyStockDividends = (player: Player, market: StockQuote[]) =>
   }, 0)
 
 export const portfolioManagementCost = (player: Player) => {
-  const freeCapacity = 4 + skillLevel(player, 'management')
+  const freeCapacity = 3 + skillLevel(player, 'management')
   const excessBusinesses = Math.max(0, player.assets.length - freeCapacity)
   if (excessBusinesses === 0) return 0
   const grossRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)
-  const overheadRate = Math.min(0.4, excessBusinesses * 0.08)
+  const overheadRate = Math.min(0.48, excessBusinesses * 0.12)
   return Math.round(grossRevenue * overheadRate)
 }
 
@@ -106,7 +117,7 @@ export const assessLoan = (
 
   const investmentIncome = Math.round((player.deposit * 0.009 + player.bonds * 0.014) * 0.7)
   const verifiedBusinessIncome = Math.round(player.assets.reduce(
-    (sum, asset) => sum + Math.max(0, asset.revenue - asset.operatingCosts),
+    (sum, asset) => sum + Math.max(0, effectiveAssetRevenue(asset) - asset.operatingCosts),
     0,
   ) * 0.55)
   const projectedIncome = Math.round(Math.max(0, projectedMonthlyIncome) * acquisitionIncomeWeight[difficulty])
@@ -168,21 +179,35 @@ export const netWorth = (player: Player, market: StockQuote[] = []) =>
 export const liquidReserve = (player: Player, market: StockQuote[] = []) =>
   player.cash + player.deposit + player.bonds + stockMarketValue(player, market)
 
-export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) => {
+export const freedomChecklist = (player: Player, market: StockQuote[] = []) => {
   const expenses = monthlyExpenses(player)
   const reliableIncome = Math.max(1,
     player.salary +
-    player.assets.reduce((sum, asset) => sum + Math.max(0, asset.revenue - asset.operatingCosts), 0) +
+    player.assets.reduce((sum, asset) => sum + Math.max(0, effectiveAssetRevenue(asset) - asset.operatingCosts), 0) +
     Math.round(player.deposit * 0.009) + Math.round(player.bonds * 0.014),
   )
   const debtServiceLoad = monthlyDebtPayments(player) / reliableIncome
   const unsecuredDebt = player.loans.filter((loan) => !loan.collateralAssetId).reduce((sum, loan) => sum + loan.balance, 0)
-  return passiveIncome(player, market) >= expenses &&
-    liquidReserve(player, market) >= expenses * 3 &&
-    debtServiceLoad <= 0.35 &&
-    unsecuredDebt <= expenses * 2 &&
-    netWorth(player, market) > 0
+  return {
+    incomeCovered: passiveIncome(player, market) >= expenses,
+    reserveReady: liquidReserve(player, market) >= expenses * 3,
+    debtLoadReady: debtServiceLoad <= 0.35,
+    unsecuredReady: unsecuredDebt <= expenses * 2,
+    positiveCapital: netWorth(player, market) > 0,
+    streak: player.freedomStreak ?? 0,
+    reserveTarget: expenses * 3,
+    reserveCurrent: liquidReserve(player, market),
+    debtServiceLoad,
+  }
 }
+
+export const meetsFreedomConditions = (player: Player, market: StockQuote[] = []) => {
+  const check = freedomChecklist(player, market)
+  return check.incomeCovered && check.reserveReady && check.debtLoadReady && check.unsecuredReady && check.positiveCapital
+}
+
+export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) =>
+  meetsFreedomConditions(player, market) && (player.freedomStreak ?? 0) >= 3
 
 export const freedomProgress = (player: Player, market: StockQuote[] = []) =>
   Math.max(0, Math.round((passiveIncome(player, market) / Math.max(1, monthlyExpenses(player))) * 100))
@@ -208,7 +233,7 @@ export const competitionStandings = (players: Player[], market: StockQuote[] = [
   })
 
 export const createMonthlyReport = (player: Player, month: number, market: StockQuote[] = [], resaleReturns = 0): MonthlyReport => {
-  const assetRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)
+  const assetRevenue = player.assets.reduce((sum, asset) => sum + effectiveAssetRevenue(asset), 0)
   const managementCost = portfolioManagementCost(player)
   const operatingCosts = player.assets.reduce((sum, asset) => sum + asset.operatingCosts, 0) + managementCost
   const assetDebtPayments = player.assets.reduce((sum, asset) => sum + asset.monthlyPayment, 0)

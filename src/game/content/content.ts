@@ -34,23 +34,30 @@ export const professions: Profession[] = [
 ]
 
 export const businesses: BusinessTemplate[] = [
-  { id: 'vending', name: 'Вендинговый автомат', icon: '🥤', category: 'Микробизнес', price: 90_000, downPayment: 90_000, loan: 0, revenue: 15_000, operatingCosts: 3_000, requiredLevel: 1 },
-  { id: 'coffee', name: 'Кофейный островок', icon: '☕', category: 'Общепит', price: 480_000, downPayment: 150_000, loan: 330_000, revenue: 72_000, operatingCosts: 26_000, requiredLevel: 1 },
-  { id: 'pickup', name: 'Пункт выдачи заказов', icon: '📦', category: 'Сервис', price: 620_000, downPayment: 180_000, loan: 440_000, revenue: 88_000, operatingCosts: 30_000, requiredLevel: 1 },
-  { id: 'marketplace', name: 'Магазин на маркетплейсе', icon: '🛒', category: 'Онлайн', price: 350_000, downPayment: 200_000, loan: 150_000, revenue: 68_000, operatingCosts: 22_000, requiredLevel: 1 },
-  { id: 'cleaning', name: 'Клининг-сервис', icon: '🧹', category: 'Услуги', price: 290_000, downPayment: 170_000, loan: 120_000, revenue: 58_000, operatingCosts: 19_000, requiredLevel: 1 },
-  { id: 'barber', name: 'Барбершоп', icon: '💈', category: 'Услуги', price: 850_000, downPayment: 270_000, loan: 580_000, revenue: 125_000, operatingCosts: 47_000, requiredLevel: 2 },
-  { id: 'fitness', name: 'Фитнес-студия', icon: '🏋️', category: 'Спорт', price: 950_000, downPayment: 290_000, loan: 660_000, revenue: 145_000, operatingCosts: 51_000, requiredLevel: 2 },
-  { id: 'school', name: 'Онлайн-школа', icon: '🎓', category: 'Онлайн', price: 540_000, downPayment: 260_000, loan: 280_000, revenue: 105_000, operatingCosts: 26_000, requiredLevel: 2 },
-  { id: 'agency', name: 'SMM-агентство', icon: '📱', category: 'Услуги', price: 410_000, downPayment: 210_000, loan: 200_000, revenue: 92_000, operatingCosts: 28_000, requiredLevel: 2 },
-  { id: 'dark-kitchen', name: 'Кухня доставки', icon: '🍜', category: 'Общепит', price: 780_000, downPayment: 250_000, loan: 530_000, revenue: 122_000, operatingCosts: 45_000, requiredLevel: 2 },
-  { id: 'wash', name: 'Автомойка', icon: '🚗', category: 'Авто', price: 1_600_000, downPayment: 460_000, loan: 1_140_000, revenue: 210_000, operatingCosts: 76_000, requiredLevel: 3 },
-  { id: 'it', name: 'IT-сервис', icon: '🖥️', category: 'IT', price: 1_400_000, downPayment: 520_000, loan: 880_000, revenue: 230_000, operatingCosts: 65_000, requiredLevel: 3 },
-  { id: 'warehouse', name: 'Склад самообслуживания', icon: '🏗️', category: 'Недвижимость', price: 2_100_000, downPayment: 590_000, loan: 1_510_000, revenue: 245_000, operatingCosts: 68_000, requiredLevel: 3 },
-  { id: 'apartment', name: 'Квартира под аренду', icon: '🏠', category: 'Недвижимость', price: 4_200_000, downPayment: 1_050_000, loan: 3_150_000, revenue: 155_000, operatingCosts: 26_000, requiredLevel: 4 },
-  { id: 'factory', name: 'Мини-производство', icon: '⚙️', category: 'Производство', price: 3_600_000, downPayment: 1_100_000, loan: 2_500_000, revenue: 360_000, operatingCosts: 135_000, requiredLevel: 4 },
-  { id: 'medical', name: 'Медицинский центр', icon: '🏥', category: 'Медицина', price: 5_100_000, downPayment: 1_450_000, loan: 3_650_000, revenue: 510_000, operatingCosts: 188_000, requiredLevel: 5 },
+  { id: 'vending', name: 'Вендинговый автомат', icon: '🥤', category: 'Микробизнес', price: 90_000, downPayment: 90_000, loan: 0, revenue: 10_000, operatingCosts: 5_000, requiredLevel: 1, loanRate: 0, loanTermMonths: 1, riskRating: 'low' },
+  { id: 'coffee', name: 'Кофейный островок', icon: '☕', category: 'Общепит', price: 480_000, downPayment: 150_000, loan: 330_000, revenue: 52_000, operatingCosts: 34_000, requiredLevel: 1, loanRate: 0.24, loanTermMonths: 48, riskRating: 'medium' },
+  { id: 'pickup', name: 'Пункт выдачи заказов', icon: '📦', category: 'Сервис', price: 620_000, downPayment: 180_000, loan: 440_000, revenue: 64_000, operatingCosts: 42_000, requiredLevel: 1, loanRate: 0.22, loanTermMonths: 60, riskRating: 'low' },
+  { id: 'marketplace', name: 'Магазин на маркетплейсе', icon: '🛒', category: 'Онлайн', price: 350_000, downPayment: 200_000, loan: 150_000, revenue: 46_000, operatingCosts: 30_000, requiredLevel: 1, loanRate: 0.28, loanTermMonths: 36, riskRating: 'high' },
+  { id: 'cleaning', name: 'Клининг-сервис', icon: '🧹', category: 'Услуги', price: 290_000, downPayment: 170_000, loan: 120_000, revenue: 40_000, operatingCosts: 26_000, requiredLevel: 1, loanRate: 0.24, loanTermMonths: 36, riskRating: 'medium' },
+  { id: 'barber', name: 'Барбершоп', icon: '💈', category: 'Услуги', price: 850_000, downPayment: 270_000, loan: 580_000, revenue: 84_000, operatingCosts: 58_000, requiredLevel: 2, loanRate: 0.24, loanTermMonths: 60, riskRating: 'medium' },
+  { id: 'fitness', name: 'Фитнес-студия', icon: '🏋️', category: 'Спорт', price: 950_000, downPayment: 290_000, loan: 660_000, revenue: 95_000, operatingCosts: 66_000, requiredLevel: 2, loanRate: 0.23, loanTermMonths: 60, riskRating: 'medium' },
+  { id: 'school', name: 'Онлайн-школа', icon: '🎓', category: 'Онлайн', price: 540_000, downPayment: 260_000, loan: 280_000, revenue: 63_000, operatingCosts: 47_000, requiredLevel: 2, loanRate: 0.30, loanTermMonths: 36, riskRating: 'high' },
+  { id: 'agency', name: 'SMM-агентство', icon: '📱', category: 'Услуги', price: 410_000, downPayment: 210_000, loan: 200_000, revenue: 60_000, operatingCosts: 43_000, requiredLevel: 2, loanRate: 0.28, loanTermMonths: 36, riskRating: 'medium' },
+  { id: 'dark-kitchen', name: 'Кухня доставки', icon: '🍜', category: 'Общепит', price: 780_000, downPayment: 250_000, loan: 530_000, revenue: 82_000, operatingCosts: 59_000, requiredLevel: 2, loanRate: 0.26, loanTermMonths: 48, riskRating: 'high' },
+  { id: 'wash', name: 'Автомойка', icon: '🚗', category: 'Авто', price: 1_600_000, downPayment: 460_000, loan: 1_140_000, revenue: 135_000, operatingCosts: 92_000, requiredLevel: 3, loanRate: 0.22, loanTermMonths: 72, riskRating: 'medium' },
+  { id: 'it', name: 'IT-сервис', icon: '🖥️', category: 'IT', price: 1_400_000, downPayment: 520_000, loan: 880_000, revenue: 140_000, operatingCosts: 95_000, requiredLevel: 3, loanRate: 0.27, loanTermMonths: 48, riskRating: 'high' },
+  { id: 'warehouse', name: 'Склад самообслуживания', icon: '🏗️', category: 'Недвижимость', price: 2_100_000, downPayment: 590_000, loan: 1_510_000, revenue: 170_000, operatingCosts: 112_000, requiredLevel: 3, loanRate: 0.19, loanTermMonths: 84, riskRating: 'low' },
+  { id: 'apartment', name: 'Квартира под аренду', icon: '🏠', category: 'Недвижимость', price: 4_200_000, downPayment: 1_050_000, loan: 3_150_000, revenue: 110_000, operatingCosts: 35_000, requiredLevel: 4, loanRate: 0.15, loanTermMonths: 120, riskRating: 'low' },
+  { id: 'factory', name: 'Мини-производство', icon: '⚙️', category: 'Производство', price: 3_600_000, downPayment: 1_100_000, loan: 2_500_000, revenue: 250_000, operatingCosts: 165_000, requiredLevel: 4, loanRate: 0.23, loanTermMonths: 84, riskRating: 'high' },
+  { id: 'medical', name: 'Медицинский центр', icon: '🏥', category: 'Медицина', price: 5_100_000, downPayment: 1_450_000, loan: 3_650_000, revenue: 330_000, operatingCosts: 220_000, requiredLevel: 5, loanRate: 0.20, loanTermMonths: 96, riskRating: 'medium' },
 ]
+
+export const rareDeals = [
+  { id: 'urgent-apartment', title: 'Квартира ниже рынка', businessId: 'apartment', description: 'Собственнику срочно нужны деньги. Цена ниже рынка, но времени на решение мало.', discount: 0.72, minLevel: 2, issueChance: 0.46 },
+  { id: 'partner-breakup', title: 'Доля после конфликта партнёров', businessId: 'fitness', description: 'Один из владельцев выходит из проекта и готов уступить свою долю дешевле.', discount: 0.74, minLevel: 2, issueChance: 0.42 },
+  { id: 'distressed-coffee', title: 'Кофейня после неудачного сезона', businessId: 'coffee', description: 'Точка продаётся быстро. Можно дешево войти, но цифры продавца требуют проверки.', discount: 0.68, minLevel: 1, issueChance: 0.52 },
+  { id: 'warehouse-auction', title: 'Склад с банковского аукциона', businessId: 'warehouse', description: 'Банк продаёт залоговый объект. Цена привлекательная, документы и арендаторы могут удивить.', discount: 0.77, minLevel: 3, issueChance: 0.38 },
+] as const
 
 export const board: { type: CellType; icon: string; label: string }[] = [
   { type: 'salary', icon: '📅', label: 'Расчёт' },
