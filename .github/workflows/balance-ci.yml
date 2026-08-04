@@ -29,6 +29,7 @@ jobs:
         id: balance_patch
         run: |
           if [ -f scripts/apply-balance-v12.mjs ]; then
+            sed -i '/freedomProgress(player, game.stockMarket)}% пути/d' scripts/apply-balance-v12.mjs
             node scripts/apply-balance-v12.mjs
             rm scripts/apply-balance-v12.mjs
             echo "applied=true" >> "$GITHUB_OUTPUT"
