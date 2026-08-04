@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import './App.css'
 import './premium.css'
+import './tabletop.css'
 import { board, businesses, developments, difficultySettings, professions } from './game/content/content'
 import type { Decision, Difficulty, Funding, GameCommand, GameState, MonthlyReport, Player, SkillId } from './game/domain/types'
 import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, competitionStandings, freedomProgress, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, pledgedLoanForAsset, stockMarketValue, totalDebt } from './game/systems/economy'
@@ -21,9 +22,10 @@ function SetupScreen() {
   return <main className="setup-shell">
     <section className="brand-lockup">
       <span className="eyebrow">ФИНАНСОВАЯ СТРАТЕГИЯ</span>
-      <div className="brand-mark">₽</div>
+      <div className="brand-mark"><span>₽</span></div>
       <h1>ВЫХОД<br/><em>ИЗ КРУГА</em></h1>
       <p>Не симулятор богатства. Игра про решения, которые либо дают тебе свободу, либо оставляют в вечной гонке.</p>
+      <div className="game-chips" aria-hidden="true"><i /><i /><i /><span>6</span></div>
     </section>
 
     <section className="setup-card">
@@ -96,10 +98,10 @@ function GameScreen() {
     {game.phase === 'finished' && <GameResult game={game} onReset={resetGame} />}
 
     <nav className="bottom-nav">
-      <button className={tab === 'board' ? 'active' : ''} onClick={() => setTab('board')}><span>◈</span>Поле</button>
-      <button className={tab === 'race' ? 'active' : ''} onClick={() => setTab('race')}><span>⌁</span>Гонка</button>
-      <button className={tab === 'assets' ? 'active' : ''} onClick={() => setTab('assets')}><span>▤</span>Активы</button>
-      <button className={tab === 'journal' ? 'active' : ''} onClick={() => setTab('journal')}><span>≡</span>Журнал</button>
+      <button className={tab === 'board' ? 'active' : ''} onClick={() => setTab('board')}><span>▦</span>Поле</button>
+      <button className={tab === 'race' ? 'active' : ''} onClick={() => setTab('race')}><span>♟</span>Гонка</button>
+      <button className={tab === 'assets' ? 'active' : ''} onClick={() => setTab('assets')}><span>◆</span>Активы</button>
+      <button className={tab === 'journal' ? 'active' : ''} onClick={() => setTab('journal')}><span>▤</span>Журнал</button>
     </nav>
   </main>
 }
@@ -108,19 +110,29 @@ function Board({ onRoll }: { onRoll: () => void }) {
   const game = useGameStore((store) => store.game)
   const player = game.players[0]
   const currentCell = board[player.position]
+  const boardFreedom = freedomProgress(player, game.stockMarket)
   return <section className="board-section">
     <div className="turn-card">
       <div><small>ТВОЙ ХОД</small><strong>{currentCell.icon} {currentCell.label}</strong></div>
       <div className="die">{game.lastRoll ?? '•'}</div>
     </div>
-    <div className="board-track">
-      {board.map((cell, index) => <div className={`tile ${index === player.position ? 'current' : ''}`} key={`${cell.type}-${index}`}>
-        <small>{index + 1}</small><span>{cell.icon}</span>
-        <div className="tokens">{game.players.filter((item) => item.position === index).map((item) => <i className={item.isBot ? 'bot' : 'human'} key={item.id} />)}</div>
+    <div className="board-frame">
+      <div className="board-track">
+      {board.map((cell, index) => <div className={`tile tile-${cell.type} ${index === player.position ? 'current' : ''}`} key={`${cell.type}-${index}`}>
+        <small>{index + 1}</small><span className="tile-icon">{cell.icon}</span><b>{cell.label}</b>
+        <div className="tokens">{game.players.filter((item) => item.position === index).map((item) => <i className={item.isBot ? `bot bot-${game.players.indexOf(item)}` : 'human'} title={item.name} key={item.id}><span /></i>)}</div>
       </div>)}
+      <div className="board-center" aria-hidden="true">
+        <span>ЦЕЛЬ ИГРЫ</span>
+        <strong>ПАССИВНЫЙ<br/>ДОХОД</strong>
+        <i>покрывает расходы</i>
+        <div className="center-progress"><b style={{ width: `${boardFreedom}%` }} /></div>
+        <em>{boardFreedom}%</em>
+      </div>
+      </div>
     </div>
     <button className="roll-button" disabled={game.phase !== 'ready'} onClick={onRoll}>
-      <span className="cube">⌁</span><b>{game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>Ход нельзя отменить</small>
+      <span className={`cube dice-face dice-${game.lastRoll ?? 0}`} aria-hidden="true"><i /><i /><i /><i /><i /><i /></span><b>{game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>{game.phase === 'ready' ? 'Испытай рынок' : 'Заверши событие этого хода'}</small>
     </button>
     <div className="rivals">{competitionStandings(game.players, game.stockMarket).slice(0, 3).map((rival, index) => <div className={rival.id === player.id ? 'you' : rival.status} key={rival.id}><b>{index + 1}</b><span>{rival.name}<small>{rival.status === 'bankrupt' ? 'Выбыл' : `${freedomProgress(rival, game.stockMarket)}% · ${money(netWorth(rival, game.stockMarket))}`}</small></span></div>)}</div>
   </section>
@@ -265,7 +277,7 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
   })}</div>{commonSkip}</>
   else body = <><span className="eyebrow">РАСЧЁТ</span><h2>Финансовая пауза</h2><p>Текущий денежный поток: <strong>{money(monthlyCashflow(player, game.stockMarket))}/мес</strong></p>{commonSkip}</>
 
-  return <div className="sheet-backdrop"><section className="decision-sheet"><div className="sheet-handle" />{body}</section></div>
+  return <div className="sheet-backdrop"><section className={`decision-sheet decision-${decision.kind}`}><div className="sheet-handle" />{body}</section></div>
 }
 
 function GameResult({ game, onReset }: { game: GameState; onReset: () => void }) {
