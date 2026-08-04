@@ -23,13 +23,24 @@ export const monthlyStockDividends = (player: Player, market: StockQuote[]) =>
     return sum + (quote ? Math.round(holding.quantity * quote.price * quote.dividendYield / 12) : 0)
   }, 0)
 
+export const portfolioManagementCost = (player: Player) => {
+  const freeCapacity = 4 + skillLevel(player, 'management')
+  const excessBusinesses = Math.max(0, player.assets.length - freeCapacity)
+  if (excessBusinesses === 0) return 0
+  const grossRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)
+  const overheadRate = Math.min(0.4, excessBusinesses * 0.08)
+  return Math.round(grossRevenue * overheadRate)
+}
+
 export const passiveIncome = (player: Player, market: StockQuote[] = []) =>
   player.assets.reduce((sum, asset) => sum + assetCashflow(asset), 0) +
   Math.round(player.deposit * 0.009) +
   Math.round(player.bonds * 0.014) + monthlyStockDividends(player, market)
 
 export const monthlyExpenses = (player: Player) =>
-  player.baseExpenses + Math.round(player.baseDebt * 0.02) + player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
+  player.baseExpenses + Math.round(player.baseDebt * 0.02) +
+  player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0) +
+  portfolioManagementCost(player)
 
 export const monthlyCashflow = (player: Player, market: StockQuote[] = []) =>
   player.salary + passiveIncome(player, market) - monthlyExpenses(player)
@@ -70,6 +81,11 @@ export interface BankAssessment {
   reason: string
 }
 
+const acquisitionIncomeWeight: Record<Difficulty, number> = { easy: 0.4, normal: 0.25, hard: 0.15 }
+const reserveMonthsForLoan: Record<Difficulty, number> = { easy: 0.25, normal: 0.5, hard: 1 }
+const acquisitionGapToCash: Record<Difficulty, number> = { easy: 1.1, normal: 0.8, hard: 0.35 }
+const unsecuredSalaryMultiplier: Record<Difficulty, number> = { easy: 3.5, normal: 1.75, hard: 1 }
+
 export const assessLoan = (
   player: Player,
   amount: number,
@@ -79,30 +95,67 @@ export const assessLoan = (
   projectedMonthlyPayment = 0,
 ): BankAssessment => {
   const settings = difficultySettings[difficulty]
+  const financeLevel = skillLevel(player, 'finance')
   const securedLimit = collateral ? availableCollateral(player, collateral) : Number.POSITIVE_INFINITY
-  const financeDiscount = skillLevel(player, 'finance') * 0.015
-  const annualRate = Math.max(0.08, (collateral ? settings.securedRate : settings.unsecuredRate) - financeDiscount)
+  const existingUnsecuredLoans = player.loans.filter((loan) => !loan.collateralAssetId)
+  const financeDiscount = financeLevel * 0.015
+  const repeatLoanSurcharge = collateral ? 0 : existingUnsecuredLoans.length * 0.02
+  const annualRate = Math.max(0.08, (collateral ? settings.securedRate : settings.unsecuredRate) - financeDiscount + repeatLoanSurcharge)
   const termMonths = collateral ? 48 : 36
   const monthlyPayment = loanPayment(amount, annualRate, termMonths)
-  const investmentIncome = Math.round(player.deposit * 0.009) + Math.round(player.bonds * 0.014)
-  const businessOperatingIncome = player.assets.reduce((sum, asset) => sum + asset.revenue - asset.operatingCosts, 0)
-  const income = Math.max(1, player.salary + investmentIncome + businessOperatingIncome + projectedMonthlyIncome)
-  const obligations = player.baseExpenses + monthlyDebtPayments(player) + projectedMonthlyPayment + monthlyPayment
-  const debtLoad = obligations / income
-  const skilledDebtLimit = settings.maxDebtLoad + skillLevel(player, 'finance') * 0.025
-  const freeForDebt = Math.max(0, income * skilledDebtLimit - player.baseExpenses - monthlyDebtPayments(player) - projectedMonthlyPayment)
+
+  const investmentIncome = Math.round((player.deposit * 0.009 + player.bonds * 0.014) * 0.7)
+  const verifiedBusinessIncome = Math.round(player.assets.reduce(
+    (sum, asset) => sum + Math.max(0, asset.revenue - asset.operatingCosts),
+    0,
+  ) * 0.55)
+  const projectedIncome = Math.round(Math.max(0, projectedMonthlyIncome) * acquisitionIncomeWeight[difficulty])
+  const income = Math.max(1, player.salary + investmentIncome + verifiedBusinessIncome + projectedIncome)
+
+  const existingDebtPayments = monthlyDebtPayments(player)
+  const debtPayments = existingDebtPayments + projectedMonthlyPayment + monthlyPayment
+  const debtLoad = debtPayments / income
+  const skilledDebtLimit = settings.maxDebtLoad + financeLevel * 0.02
+
+  const livingCosts = player.baseExpenses + portfolioManagementCost(player)
+  const safetyMargin = Math.round(livingCosts * (difficulty === 'easy' ? 0.08 : difficulty === 'normal' ? 0.15 : 0.22))
+  const freeForDebt = Math.max(0, income - livingCosts - existingDebtPayments - projectedMonthlyPayment - safetyMargin)
   const paymentPerRuble = loanPayment(100_000, annualRate, termMonths) / 100_000
   const incomeLimit = Math.max(0, Math.floor(freeForDebt / Math.max(paymentPerRuble, 0.001) / 10_000) * 10_000)
-  const limit = Math.max(0, Math.min(incomeLimit, securedLimit))
-  const leveragePenalty = Math.min(230, Math.round((totalDebt(player) / Math.max(1, income * 12)) * 145))
-  const cashflowBonus = Math.min(90, Math.round(Math.max(0, monthlyCashflow(player)) / income * 130))
-  const score = Math.max(300, Math.min(850, 735 + cashflowBonus - leveragePenalty - (difficulty === 'hard' ? 35 : 0)))
-  const approved = amount > 0 && amount <= limit && debtLoad <= skilledDebtLimit
+
+  const unsecuredBalance = existingUnsecuredLoans.reduce((sum, loan) => sum + loan.balance, 0)
+  const verifiedNetBusinessIncome = player.assets.reduce((sum, asset) => sum + Math.max(0, assetCashflow(asset)), 0)
+  const unsecuredCap = Math.round(
+    player.salary * (unsecuredSalaryMultiplier[difficulty] + financeLevel * 0.35) +
+    verifiedNetBusinessIncome * (difficulty === 'easy' ? 9 : difficulty === 'normal' ? 6 : 4),
+  )
+  const unsecuredRoom = collateral ? Number.POSITIVE_INFINITY : Math.max(0, unsecuredCap - unsecuredBalance)
+  const limit = Math.max(0, Math.min(incomeLimit, securedLimit, unsecuredRoom))
+
+  const acquisitionLoan = projectedMonthlyIncome > 0 || projectedMonthlyPayment > 0
+  const contributionLimit = player.cash * (acquisitionGapToCash[difficulty] + financeLevel * 0.1)
+  const contributionReady = !acquisitionLoan || amount <= contributionLimit
+  const liquidity = player.cash + player.deposit + player.bonds
+  const liquidityReady = liquidity >= monthlyExpenses(player) * reserveMonthsForLoan[difficulty]
+
+  const leveragePenalty = Math.min(250, Math.round((totalDebt(player) / Math.max(1, income * 12)) * 155))
+  const debtLoadPenalty = Math.min(170, Math.round(debtLoad * 210))
+  const repeatedLoanPenalty = existingUnsecuredLoans.length * 28
+  const cashflowBonus = Math.min(80, Math.round(Math.max(0, monthlyCashflow(player)) / income * 110))
+  const score = Math.max(300, Math.min(850, 745 + cashflowBonus - leveragePenalty - debtLoadPenalty - repeatedLoanPenalty - (difficulty === 'hard' ? 25 : 0)))
+  const minimumScore = collateral ? 550 : 600
+
+  const approved = amount > 0 && amount <= limit && debtLoad <= skilledDebtLimit &&
+    contributionReady && liquidityReady && score >= minimumScore
   const reason = approved
     ? collateral ? 'Одобрено под залог актива' : 'Одобрено без залога'
     : collateral && securedLimit < amount ? 'Стоимость залога не покрывает сумму'
-      : freeForDebt <= 0 ? 'Доход уже перегружен обязательными платежами'
-        : `Банк готов дать не больше ${limit.toLocaleString('ru-RU')} ₽`
+      : !contributionReady ? 'Нужно вложить больше собственных денег в первый взнос'
+        : !liquidityReady ? 'Сначала создай денежный резерв'
+          : debtLoad > skilledDebtLimit ? 'Долговая нагрузка выше допустимой'
+            : score < minimumScore ? 'Кредитный рейтинг пока недостаточен'
+              : freeForDebt <= 0 ? 'Доход уже перегружен обязательными платежами'
+                : `Банк готов дать не больше ${limit.toLocaleString('ru-RU')} ₽`
   return { approved, score, debtLoad, limit, amount, annualRate, termMonths, monthlyPayment, reason }
 }
 
@@ -115,8 +168,21 @@ export const netWorth = (player: Player, market: StockQuote[] = []) =>
 export const liquidReserve = (player: Player, market: StockQuote[] = []) =>
   player.cash + player.deposit + player.bonds + stockMarketValue(player, market)
 
-export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) =>
-  passiveIncome(player, market) >= monthlyExpenses(player) && liquidReserve(player, market) >= monthlyExpenses(player) * 3
+export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) => {
+  const expenses = monthlyExpenses(player)
+  const reliableIncome = Math.max(1,
+    player.salary +
+    player.assets.reduce((sum, asset) => sum + Math.max(0, asset.revenue - asset.operatingCosts), 0) +
+    Math.round(player.deposit * 0.009) + Math.round(player.bonds * 0.014),
+  )
+  const debtServiceLoad = monthlyDebtPayments(player) / reliableIncome
+  const unsecuredDebt = player.loans.filter((loan) => !loan.collateralAssetId).reduce((sum, loan) => sum + loan.balance, 0)
+  return passiveIncome(player, market) >= expenses &&
+    liquidReserve(player, market) >= expenses * 3 &&
+    debtServiceLoad <= 0.35 &&
+    unsecuredDebt <= expenses * 2 &&
+    netWorth(player, market) > 0
+}
 
 export const freedomProgress = (player: Player, market: StockQuote[] = []) =>
   Math.max(0, Math.round((passiveIncome(player, market) / Math.max(1, monthlyExpenses(player))) * 100))
@@ -143,7 +209,8 @@ export const competitionStandings = (players: Player[], market: StockQuote[] = [
 
 export const createMonthlyReport = (player: Player, month: number, market: StockQuote[] = [], resaleReturns = 0): MonthlyReport => {
   const assetRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)
-  const operatingCosts = player.assets.reduce((sum, asset) => sum + asset.operatingCosts, 0)
+  const managementCost = portfolioManagementCost(player)
+  const operatingCosts = player.assets.reduce((sum, asset) => sum + asset.operatingCosts, 0) + managementCost
   const assetDebtPayments = player.assets.reduce((sum, asset) => sum + asset.monthlyPayment, 0)
   const depositIncome = Math.round(player.deposit * 0.009)
   const bondIncome = Math.round(player.bonds * 0.014)
