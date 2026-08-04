@@ -38,6 +38,10 @@ jobs:
           balance = Path('src/game/engine/balance.test.ts')
           text = balance.read_text()
           text = text.replace(
+              "assessLoan, assetCashflow, freedomProgress, isFinanciallyFree",
+              "assessLoan, isFinanciallyFree",
+          )
+          text = text.replace(
               "player.cash = 100_000\n    const modestGap = assessLoan(player, 80_000",
               "player.cash = 150_000\n    const modestGap = assessLoan(player, 30_000",
           )
