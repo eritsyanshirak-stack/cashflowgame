@@ -1,9 +1,9 @@
-import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, professions } from '../content/content'
+import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, initialStockMarket, marketHeadlines, professions } from '../content/content'
 import type { Asset, BotStrategy, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
-import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isFinanciallyFree, loanPayment, monthlyCashflow, pledgedLoanForAsset } from '../systems/economy'
+import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isFinanciallyFree, loanPayment, pledgedLoanForAsset } from '../systems/economy'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 4,
+  version: 5,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -16,6 +16,8 @@ export const emptyGame = (seed = Date.now()): GameState => ({
   events: [],
   lastMonthlyReport: null,
   difficulty: 'normal',
+  stockMarket: structuredClone(initialStockMarket),
+  marketHeadline: 'Рынок открылся без сильных движений',
 })
 
 const random = (state: GameState) => {
@@ -49,6 +51,8 @@ const makePlayer = (professionId: string, name: string, isBot: boolean, index: n
     loans: [],
     deposit: 0,
     bonds: 0,
+    stocks: [],
+    resaleDeals: [],
     botStrategy: isBot ? botStrategies[(index - 1) % botStrategies.length] : undefined,
   }
 }
@@ -63,10 +67,10 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
     return { kind: 'expense', title, amount }
   }
   if (type === 'chance') {
-    const [title, investment, returnAmount] = pick(state, chanceCards)
-    return { kind: 'chance', title, investment, returnAmount }
+    const [title, investment, minReturn, maxReturn, durationMonths] = pick(state, chanceCards)
+    return { kind: 'chance', title, investment, minReturn, maxReturn, durationMonths }
   }
-  if (type === 'market') return { kind: 'market', title: 'Рынок качнуло', description: 'Цены изменились. Проверь запас денег и не принимай решение на эмоциях.' }
+  if (type === 'market') return { kind: 'market', title: state.marketHeadline, description: 'Смотри не только на движение цены, но и на риск, дивиденды и долю акций в капитале.' }
   return { kind: type }
 }
 
@@ -95,11 +99,51 @@ const updateAssetMarket = (state: GameState, player: Player) => {
   player.loans = player.loans.filter((loan) => loan.balance > 0)
 }
 
+const updateStockMarket = (state: GameState) => {
+  const settings = difficultySettings[state.difficulty]
+  const headline = pick(state, marketHeadlines)
+  state.marketHeadline = headline.title
+  state.stockMarket.forEach((quote) => {
+    quote.previousPrice = quote.price
+    const sectorImpact = quote.sector === headline.sector ? headline.impact : 0
+    const marketNoise = (random(state) * 2 - 1) * settings.marketVolatility
+    quote.price = Math.max(1_000, Math.round(quote.price * (1 + sectorImpact + marketNoise)))
+  })
+}
+
+const settleResales = (state: GameState, player: Player, nextMonth: number) => {
+  let returns = 0
+  const settings = difficultySettings[state.difficulty]
+  for (const deal of player.resaleDeals) {
+    if (deal.resolvesMonth > nextMonth) continue
+    const canDelay = deal.delays < 1
+    if (canDelay && random(state) < settings.resaleDelayChance) {
+      deal.resolvesMonth += 1
+      deal.delays += 1
+      if (!player.isBot) addEvent(state, 'Товар завис', `${deal.title}: покупатель сорвался, ждём ещё месяц.`, 'bad')
+      continue
+    }
+    returns += deal.outcomeAmount
+    if (!player.isBot) {
+      const profit = deal.outcomeAmount - deal.investment
+      addEvent(state, 'Перепродажа завершена', `${deal.title}: ${profit >= 0 ? '+' : ''}${profit.toLocaleString('ru-RU')} ₽`, profit >= 0 ? 'good' : 'bad')
+    }
+  }
+  player.resaleDeals = player.resaleDeals.filter((deal) => deal.resolvesMonth > nextMonth)
+  return returns
+}
+
 const settleMonth = (state: GameState) => {
-  const humanReport = createMonthlyReport(state.players[0], state.month)
-  state.players.forEach((player) => { player.cash += monthlyCashflow(player) })
+  const nextMonth = state.month + 1
+  const resaleReturns = state.players.map((player) => settleResales(state, player, nextMonth))
+  const humanReport = createMonthlyReport(state.players[0], state.month, state.stockMarket, resaleReturns[0])
+  state.players.forEach((player, index) => {
+    const report = createMonthlyReport(player, state.month, state.stockMarket, resaleReturns[index])
+    player.cash += report.netCashflow
+  })
   state.players.forEach((player) => updateAssetMarket(state, player))
-  state.month += 1
+  updateStockMarket(state)
+  state.month = nextMonth
   state.day = 1
   state.lastMonthlyReport = humanReport
   addEvent(state, 'Итоги месяца', `Чистый результат: ${humanReport.netCashflow.toLocaleString('ru-RU')} ₽`, humanReport.netCashflow >= 0 ? 'good' : 'bad')
@@ -242,6 +286,27 @@ const runBots = (state: GameState) => {
       }
     }
     if (cell.type === 'expense') bot.cash -= pick(state, expenseCards)[1]
+    if (cell.type === 'market' && random(state) < settings.botActivity) {
+      const quotes = [...state.stockMarket].sort((a, b) => strategy === 'careful' ? b.dividendYield - a.dividendYield : (b.price / b.previousPrice) - (a.price / a.previousPrice))
+      const quote = quotes[0]
+      const reserve = bot.baseExpenses * (strategy === 'careful' ? 1 : 0.35)
+      const buyPrice = Math.ceil(quote.price * 1.015)
+      if (bot.cash >= buyPrice + reserve) {
+        bot.cash -= buyPrice
+        const holding = bot.stocks.find((item) => item.stockId === quote.id)
+        if (holding) {
+          holding.averagePrice = Math.round((holding.averagePrice * holding.quantity + buyPrice) / (holding.quantity + 1))
+          holding.quantity += 1
+        } else bot.stocks.push({ stockId: quote.id, quantity: 1, averagePrice: buyPrice })
+      }
+    }
+    if (cell.type === 'chance' && random(state) < settings.botActivity * 0.55) {
+      const [title, investment, minReturn, maxReturn, durationMonths] = pick(state, chanceCards)
+      if (bot.cash > investment + bot.baseExpenses * 0.4) {
+        bot.cash -= investment
+        bot.resaleDeals.push({ id: uid(state, 'bot-resale'), title, investment, expectedMin: minReturn, expectedMax: maxReturn, resolvesMonth: state.month + durationMonths, outcomeAmount: Math.round(minReturn + random(state) * (maxReturn - minReturn)), delays: 0 })
+      }
+    }
   }
 }
 
@@ -250,7 +315,7 @@ const completeHumanTurn = (state: GameState) => {
   runBots(state)
   advanceCalendar(state)
   state.currentPlayerIndex = 0
-  state.phase = isFinanciallyFree(state.players[0]) ? 'victory' : 'ready'
+  state.phase = isFinanciallyFree(state.players[0], state.stockMarket) ? 'victory' : 'ready'
   if (state.phase === 'victory') addEvent(state, 'Финансовая свобода', 'Пассивный доход покрывает все расходы.', 'good')
 }
 
@@ -407,8 +472,11 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   if (command.type === 'TAKE_CHANCE') {
     if (decision.kind !== 'chance') return reject(current, 'Сейчас нет возможности для перепродажи')
     if (player.cash < decision.investment) return reject(current, 'Не хватает денег для вложения')
-    player.cash += decision.returnAmount - decision.investment
-    addEvent(state, 'Перепродажа', `Результат +${(decision.returnAmount - decision.investment).toLocaleString('ru-RU')} ₽`, 'good')
+    const difficultyPenalty = state.difficulty === 'hard' ? 0.95 : state.difficulty === 'easy' ? 1.04 : 1
+    const outcomeAmount = Math.round((decision.minReturn + random(state) * (decision.maxReturn - decision.minReturn)) * difficultyPenalty)
+    player.cash -= decision.investment
+    player.resaleDeals.push({ id: uid(state, 'resale'), title: decision.title, investment: decision.investment, expectedMin: decision.minReturn, expectedMax: decision.maxReturn, resolvesMonth: state.month + decision.durationMonths, outcomeAmount, delays: 0 })
+    addEvent(state, 'Товар куплен', `${decision.title}: вложено ${decision.investment.toLocaleString('ru-RU')} ₽, результат через ${decision.durationMonths} мес.`, 'neutral')
     completeHumanTurn(state)
     return { state, accepted: true }
   }
@@ -429,6 +497,31 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     player.cash += amount
     if (command.type === 'WITHDRAW_DEPOSIT') player.deposit -= amount
     else player.bonds -= amount
+    return { state, accepted: true }
+  }
+  if (command.type === 'BUY_STOCK' || command.type === 'SELL_STOCK') {
+    if (decision.kind !== 'market') return reject(current, 'Акции доступны только на клетке рынка')
+    if (!Number.isInteger(command.quantity) || command.quantity <= 0) return reject(current, 'Некорректное количество акций')
+    const quote = state.stockMarket.find((item) => item.id === command.stockId)
+    if (!quote) return reject(current, 'Компания не найдена')
+    const holding = player.stocks.find((item) => item.stockId === quote.id)
+    if (command.type === 'BUY_STOCK') {
+      const total = Math.ceil(quote.price * command.quantity * 1.015)
+      if (player.cash < total) return reject(current, 'Не хватает денег на покупку акций')
+      player.cash -= total
+      if (holding) {
+        holding.averagePrice = Math.round((holding.averagePrice * holding.quantity + total) / (holding.quantity + command.quantity))
+        holding.quantity += command.quantity
+      } else player.stocks.push({ stockId: quote.id, quantity: command.quantity, averagePrice: Math.round(total / command.quantity) })
+      addEvent(state, 'Акции куплены', `${quote.ticker}: ${command.quantity} шт. за ${total.toLocaleString('ru-RU')} ₽`)
+    } else {
+      if (!holding || holding.quantity < command.quantity) return reject(current, 'Столько акций в портфеле нет')
+      const proceeds = Math.floor(quote.price * command.quantity * 0.985)
+      player.cash += proceeds
+      holding.quantity -= command.quantity
+      if (holding.quantity === 0) player.stocks = player.stocks.filter((item) => item.stockId !== quote.id)
+      addEvent(state, 'Акции проданы', `${quote.ticker}: ${command.quantity} шт., получено ${proceeds.toLocaleString('ru-RU')} ₽`, proceeds >= holding.averagePrice * command.quantity ? 'good' : 'bad')
+    }
     return { state, accepted: true }
   }
   if (command.type === 'TAKE_LOAN') {

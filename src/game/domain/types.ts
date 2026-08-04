@@ -49,6 +49,33 @@ export interface Loan {
   collateralAssetId?: string
 }
 
+export interface StockQuote {
+  id: string
+  name: string
+  ticker: string
+  sector: string
+  price: number
+  previousPrice: number
+  dividendYield: number
+}
+
+export interface StockHolding {
+  stockId: string
+  quantity: number
+  averagePrice: number
+}
+
+export interface ResaleDeal {
+  id: string
+  title: string
+  investment: number
+  expectedMin: number
+  expectedMax: number
+  resolvesMonth: number
+  outcomeAmount: number
+  delays: number
+}
+
 export interface Player {
   id: PlayerId
   name: string
@@ -63,13 +90,15 @@ export interface Player {
   loans: Loan[]
   deposit: number
   bonds: number
+  stocks: StockHolding[]
+  resaleDeals: ResaleDeal[]
   botStrategy?: BotStrategy
 }
 
 export type Decision =
   | { kind: 'business'; businessId: string; askingPrice: number; negotiated: boolean; negotiationNote?: string }
   | { kind: 'expense'; title: string; amount: number }
-  | { kind: 'chance'; title: string; investment: number; returnAmount: number }
+  | { kind: 'chance'; title: string; investment: number; minReturn: number; maxReturn: number; durationMonths: number }
   | { kind: 'market'; title: string; description: string }
   | { kind: 'bank' }
   | { kind: 'growth' }
@@ -91,6 +120,8 @@ export interface MonthlyReport {
   assetRevenue: number
   depositIncome: number
   bondIncome: number
+  stockDividends: number
+  resaleReturns: number
   livingExpenses: number
   operatingCosts: number
   assetDebtPayments: number
@@ -100,7 +131,7 @@ export interface MonthlyReport {
 }
 
 export interface GameState {
-  version: 4
+  version: 5
   seed: number
   phase: Phase
   day: number
@@ -113,6 +144,8 @@ export interface GameState {
   events: GameEvent[]
   lastMonthlyReport: MonthlyReport | null
   difficulty: Difficulty
+  stockMarket: StockQuote[]
+  marketHeadline: string
 }
 
 export type Funding = 'cash' | 'credit' | 'secured' | 'partner30' | 'partner50'
@@ -134,6 +167,8 @@ export type GameCommand =
   | { type: 'WITHDRAW_DEPOSIT'; amount: number }
   | { type: 'BUY_BONDS'; amount: number }
   | { type: 'SELL_BONDS'; amount: number }
+  | { type: 'BUY_STOCK'; stockId: string; quantity: number }
+  | { type: 'SELL_STOCK'; stockId: string; quantity: number }
   | { type: 'TAKE_LOAN'; amount: number; collateralAssetId?: string }
   | { type: 'REPAY_LOAN'; amount: number }
   | { type: 'TRAIN'; cost: number }

@@ -333,6 +333,30 @@ h1 em { -webkit-text-stroke-color: var(--acid); }
 .loan-list > div small { margin-top: 2px; color: #858a90; font-size: 7px; }
 .loan-list > div strong { color: #30343a; font-size: 10px; text-align: right; }
 
+.portfolio-section { padding: 12px; margin-top: 12px; background: #fff; border: 1px solid #e5e7ea; border-radius: 14px; }
+.portfolio-section > p { margin: 9px 0 2px; color: #858a90; font-size: 9px; line-height: 1.45; }
+.portfolio-heading, .holding-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portfolio-heading span, .portfolio-heading small, .portfolio-heading b, .holding-row span, .holding-row b, .holding-row small, .holding-row strong { display: block; }
+.portfolio-heading small { color: #92969c; font-size: 7px; font-weight: 800; letter-spacing: .12em; }
+.portfolio-heading b { margin-top: 3px; color: #30343a; font-size: 13px; }
+.portfolio-heading > strong { font-size: 9px; text-align: right; }
+.holding-row { padding: 10px 0; border-top: 1px solid #eceef0; }
+.holding-row:first-of-type { margin-top: 8px; }
+.holding-row b { color: #30343a; font-size: 9px; }
+.holding-row small { margin-top: 3px; color: #858a90; font-size: 7px; }
+.holding-row > strong { color: #30343a; font-size: 10px; text-align: right; white-space: nowrap; }
+.stock-list { display: grid; gap: 7px; margin: 12px 0 8px; }
+.stock-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 10px; padding: 10px; background: #f5f6f7; border: 1px solid #e5e7ea; border-radius: 11px; }
+.stock-row b, .stock-row small, .stock-row strong { display: block; }
+.stock-row b { color: #24282d; font-size: 11px; }
+.stock-row small { margin-top: 2px; color: #7d8288; font-size: 7px; }
+.stock-row > span { text-align: right; }
+.stock-row > span strong { color: #24282d; font-size: 11px; }
+.stock-row > div:last-child { display: grid; grid-template-columns: 1fr 1fr; grid-column: 1 / -1; gap: 6px; }
+.stock-row button { min-height: 32px; color: #176b4d; background: #fff; border: 1px solid #d9e2de; border-radius: 8px; font-size: 8px; font-weight: 800; }
+.stock-row button:disabled { color: #a3a7ac; background: #eceeef; border-color: #e2e4e6; }
+.market-fee { display: block; margin-bottom: 10px; color: #8b9096; font-size: 7px; text-align: center; }
+
 @media (max-width: 370px) {
   .hero-stats { margin-inline: 9px; }
   .board-section, .content-section { padding-inline: 9px; }

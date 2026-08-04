@@ -1,5 +1,5 @@
 import { difficultySettings } from '../content/content'
-import type { Asset, Difficulty, MonthlyReport, Player } from '../domain/types'
+import type { Asset, Difficulty, MonthlyReport, Player, StockQuote } from '../domain/types'
 
 export const assetCashflow = (asset: Asset) =>
   asset.revenue - asset.operatingCosts - asset.monthlyPayment
@@ -13,16 +13,25 @@ export const assetSaleProceeds = (asset: Asset) =>
 export const assetLiquidationProceeds = (player: Player, asset: Asset, grossPrice = assetMarketValue(asset)) =>
   Math.max(0, grossPrice - asset.loan - (pledgedLoanForAsset(player, asset.id)?.balance ?? 0))
 
-export const passiveIncome = (player: Player) =>
+export const stockMarketValue = (player: Player, market: StockQuote[]) =>
+  player.stocks.reduce((sum, holding) => sum + holding.quantity * (market.find((quote) => quote.id === holding.stockId)?.price ?? 0), 0)
+
+export const monthlyStockDividends = (player: Player, market: StockQuote[]) =>
+  player.stocks.reduce((sum, holding) => {
+    const quote = market.find((item) => item.id === holding.stockId)
+    return sum + (quote ? Math.round(holding.quantity * quote.price * quote.dividendYield / 12) : 0)
+  }, 0)
+
+export const passiveIncome = (player: Player, market: StockQuote[] = []) =>
   player.assets.reduce((sum, asset) => sum + assetCashflow(asset), 0) +
   Math.round(player.deposit * 0.009) +
-  Math.round(player.bonds * 0.014)
+  Math.round(player.bonds * 0.014) + monthlyStockDividends(player, market)
 
 export const monthlyExpenses = (player: Player) =>
   player.baseExpenses + player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
 
-export const monthlyCashflow = (player: Player) =>
-  player.salary + passiveIncome(player) - monthlyExpenses(player)
+export const monthlyCashflow = (player: Player, market: StockQuote[] = []) =>
+  player.salary + passiveIncome(player, market) - monthlyExpenses(player)
 
 export const totalDebt = (player: Player) =>
   player.baseDebt +
@@ -94,22 +103,24 @@ export const assessLoan = (
   return { approved, score, debtLoad, limit, amount, annualRate, termMonths, monthlyPayment, reason }
 }
 
-export const netWorth = (player: Player) =>
+export const netWorth = (player: Player, market: StockQuote[] = []) =>
   player.cash + player.deposit + player.bonds +
+  stockMarketValue(player, market) +
   player.assets.reduce((sum, asset) => sum + assetMarketValue(asset) - asset.loan, 0) -
   player.baseDebt - player.loans.reduce((sum, loan) => sum + loan.balance, 0)
 
-export const isFinanciallyFree = (player: Player) =>
-  passiveIncome(player) >= monthlyExpenses(player)
+export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) =>
+  passiveIncome(player, market) >= monthlyExpenses(player)
 
-export const createMonthlyReport = (player: Player, month: number): MonthlyReport => {
+export const createMonthlyReport = (player: Player, month: number, market: StockQuote[] = [], resaleReturns = 0): MonthlyReport => {
   const assetRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)
   const operatingCosts = player.assets.reduce((sum, asset) => sum + asset.operatingCosts, 0)
   const assetDebtPayments = player.assets.reduce((sum, asset) => sum + asset.monthlyPayment, 0)
   const depositIncome = Math.round(player.deposit * 0.009)
   const bondIncome = Math.round(player.bonds * 0.014)
+  const stockDividends = monthlyStockDividends(player, market)
   const loanPayments = player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
-  const netCashflow = player.salary + assetRevenue + depositIncome + bondIncome -
+  const netCashflow = player.salary + assetRevenue + depositIncome + bondIncome + stockDividends + resaleReturns -
     player.baseExpenses - operatingCosts - assetDebtPayments - loanPayments
 
   return {
@@ -118,7 +129,7 @@ export const createMonthlyReport = (player: Player, month: number): MonthlyRepor
     salary: player.salary,
     assetRevenue,
     depositIncome,
-    bondIncome,
+    bondIncome, stockDividends, resaleReturns,
     livingExpenses: player.baseExpenses,
     operatingCosts,
     assetDebtPayments,

@@ -1,4 +1,4 @@
-import type { BusinessTemplate, CellType, Difficulty, Profession } from '../domain/types'
+import type { BusinessTemplate, CellType, Difficulty, Profession, StockQuote } from '../domain/types'
 
 export const difficultySettings: Record<Difficulty, {
   label: string
@@ -10,10 +10,11 @@ export const difficultySettings: Record<Difficulty, {
   maxDebtLoad: number
   unsecuredRate: number
   securedRate: number
+  resaleDelayChance: number
 }> = {
-  easy: { label: 'Спокойно', description: 'Рынок мягче, торг проще', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48, maxDebtLoad: 0.9, unsecuredRate: 0.2, securedRate: 0.14 },
-  normal: { label: 'Баланс', description: 'Честная конкуренция', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.68, maxDebtLoad: 0.82, unsecuredRate: 0.25, securedRate: 0.18 },
-  hard: { label: 'Жёстко', description: 'Сильные боты и нервный рынок', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86, maxDebtLoad: 0.76, unsecuredRate: 0.31, securedRate: 0.23 },
+  easy: { label: 'Спокойно', description: 'Рынок мягче, торг проще', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48, maxDebtLoad: 0.9, unsecuredRate: 0.2, securedRate: 0.14, resaleDelayChance: 0.08 },
+  normal: { label: 'Баланс', description: 'Честная конкуренция', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.68, maxDebtLoad: 0.82, unsecuredRate: 0.25, securedRate: 0.18, resaleDelayChance: 0.15 },
+  hard: { label: 'Жёстко', description: 'Сильные боты и нервный рынок', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86, maxDebtLoad: 0.76, unsecuredRate: 0.31, securedRate: 0.23, resaleDelayChance: 0.24 },
 }
 
 export const developments = [
@@ -79,8 +80,26 @@ export const expenseCards = [
 ] as const
 
 export const chanceCards = [
-  ['Партия техники', 100_000, 155_000],
-  ['Авто на перепродажу', 350_000, 510_000],
-  ['Редкие кроссовки', 80_000, 132_000],
-  ['Цифровой продукт', 140_000, 260_000],
+  ['Партия техники', 100_000, 72_000, 162_000, 1],
+  ['Авто на перепродажу', 350_000, 270_000, 535_000, 2],
+  ['Редкие кроссовки', 80_000, 48_000, 138_000, 1],
+  ['Цифровой продукт', 140_000, 65_000, 285_000, 2],
+  ['Мебель с закрывшегося шоурума', 190_000, 125_000, 310_000, 2],
+] as const
+
+export const initialStockMarket: StockQuote[] = [
+  { id: 'energy', name: 'Север Энерго', ticker: 'SEVR', sector: 'Энергетика', price: 18_400, previousPrice: 18_400, dividendYield: 0.072 },
+  { id: 'tech', name: 'Нова Тех', ticker: 'NOVA', sector: 'Технологии', price: 31_800, previousPrice: 31_800, dividendYield: 0.018 },
+  { id: 'retail', name: 'Город Маркет', ticker: 'CITY', sector: 'Ритейл', price: 12_600, previousPrice: 12_600, dividendYield: 0.048 },
+  { id: 'bank', name: 'Первый Банк', ticker: 'BANK', sector: 'Финансы', price: 24_200, previousPrice: 24_200, dividendYield: 0.061 },
+  { id: 'biotech', name: 'Вита Лаб', ticker: 'VITA', sector: 'Биотех', price: 42_500, previousPrice: 42_500, dividendYield: 0.008 },
+]
+
+export const marketHeadlines = [
+  { title: 'Ставку снизили', sector: 'Финансы', impact: 0.08 },
+  { title: 'Спрос на технологии ускорился', sector: 'Технологии', impact: 0.11 },
+  { title: 'Потребители начали экономить', sector: 'Ритейл', impact: -0.09 },
+  { title: 'Новый экспортный контракт', sector: 'Энергетика', impact: 0.1 },
+  { title: 'Испытания препарата задержались', sector: 'Биотех', impact: -0.13 },
+  { title: 'Рынок ждёт новых данных', sector: null, impact: 0 },
 ] as const

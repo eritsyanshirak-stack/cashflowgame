@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { businesses } from '../content/content'
 import { executeCommand, emptyGame } from './engine'
-import { assetCashflow, monthlyCashflow, passiveIncome } from '../systems/economy'
+import { assetCashflow, monthlyCashflow, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
 import type { Asset } from '../domain/types'
 
 const startedGame = (seed = 7) => executeCommand(emptyGame(seed), { type: 'START_GAME', professionId: 'trainer', seed }).state
@@ -284,5 +284,64 @@ describe('game engine', () => {
 
     expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 20_000, collateralAssetId: undefined })
     expect(sale.state.players[0].cash).toBe(190_000)
+  })
+
+  it('buys and sells real stock quantities with a spread', () => {
+    const game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'market', title: 'Биржа', description: '' }
+    const quote = game.stockMarket[0]
+    const bought = executeCommand(game, { type: 'BUY_STOCK', stockId: quote.id, quantity: 2 })
+
+    expect(bought.accepted).toBe(true)
+    expect(bought.state.players[0].stocks[0]).toMatchObject({ stockId: quote.id, quantity: 2 })
+    expect(bought.state.players[0].cash).toBe(150_000 - Math.ceil(quote.price * 2 * 1.015))
+
+    const sold = executeCommand(bought.state, { type: 'SELL_STOCK', stockId: quote.id, quantity: 1 })
+    expect(sold.accepted).toBe(true)
+    expect(sold.state.players[0].stocks[0].quantity).toBe(1)
+    expect(sold.state.players[0].cash).toBe(bought.state.players[0].cash + Math.floor(quote.price * 0.985))
+    expect(executeCommand(sold.state, { type: 'SELL_STOCK', stockId: quote.id, quantity: 2 }).accepted).toBe(false)
+  })
+
+  it('counts stock market value and dividends in wealth and passive income', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const quote = game.stockMarket[0]
+    player.stocks.push({ stockId: quote.id, quantity: 10, averagePrice: quote.price })
+
+    expect(stockMarketValue(player, game.stockMarket)).toBe(quote.price * 10)
+    expect(monthlyStockDividends(player, game.stockMarket)).toBe(Math.round(quote.price * 10 * quote.dividendYield / 12))
+    expect(netWorth(player, game.stockMarket)).toBe(netWorth({ ...player, stocks: [] }, game.stockMarket) + quote.price * 10)
+  })
+
+  it('locks resale capital instead of paying an instant guaranteed profit', () => {
+    const game = startedGame(11)
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'chance', title: 'Партия техники', investment: 100_000, minReturn: 72_000, maxReturn: 162_000, durationMonths: 1 }
+
+    const result = executeCommand(game, { type: 'TAKE_CHANCE' })
+
+    expect(result.accepted).toBe(true)
+    expect(result.state.players[0].cash).toBe(50_000)
+    expect(result.state.players[0].resaleDeals).toHaveLength(1)
+    expect(result.state.players[0].resaleDeals[0].resolvesMonth).toBe(2)
+  })
+
+  it('returns resale proceeds only when its month closes', () => {
+    let game = startedGame(19)
+    const player = game.players[0]
+    player.resaleDeals.push({ id: 'deal-1', title: 'Товар', investment: 100_000, expectedMin: 70_000, expectedMax: 150_000, resolvesMonth: 2, outcomeAmount: 140_000, delays: 1 })
+    const cashBeforeMonth = player.cash
+
+    for (let turn = 0; turn < 7; turn += 1) {
+      game.phase = 'decision'
+      game.pendingDecision = { kind: 'salary' }
+      game = executeCommand(game, { type: 'SKIP_DECISION' }).state
+    }
+
+    expect(game.players[0].resaleDeals).toHaveLength(0)
+    expect(game.lastMonthlyReport?.resaleReturns).toBe(140_000)
+    expect(game.players[0].cash).toBe(cashBeforeMonth + monthlyCashflow(player, game.stockMarket) + 140_000)
   })
 })
