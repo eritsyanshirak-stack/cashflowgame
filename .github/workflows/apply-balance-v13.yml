@@ -1,0 +1,62 @@
+name: Apply Balance v1.3
+
+on:
+  push:
+    branches:
+      - ci/apply-balance-v13
+
+permissions:
+  contents: write
+
+jobs:
+  apply-verify-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout balance branch
+        uses: actions/checkout@v4
+        with:
+          ref: balance-v1.1
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply staged changes
+        run: python3 scripts/apply_financing_audit_fixes.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run all tests
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Commit verified source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/apply_financing_audit_fixes.py
+          git add -A
+          git commit -m "feat: explicit collateral, asset listings and market rebalance"
+          git push origin HEAD:balance-v1.1
+
+      - name: Publish clean preview
+        run: |
+          rm -rf /tmp/balance-preview
+          mkdir -p /tmp/balance-preview
+          cp -R dist/. /tmp/balance-preview/
+          git checkout --orphan balance-preview-static
+          git rm -rf . || true
+          git clean -fdx
+          cp -R /tmp/balance-preview/. .
+          sed -i 's|src="/assets/|src="assets/|g; s|href="/assets/|href="assets/|g' index.html
+          touch .nojekyll
+          git add -A
+          git commit -m "preview: balance v1.3 ${GITHUB_SHA}"
+          git push --force origin HEAD:balance-preview-static
