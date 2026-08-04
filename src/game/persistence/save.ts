@@ -18,6 +18,12 @@ const saveSchema = z.object({
   })).min(1),
   pendingDecision: z.unknown().nullable(),
   events: z.array(z.unknown()),
+  lastMonthlyReport: z.object({
+    month: z.number().int().min(1), startingCash: z.number(), salary: z.number(),
+    assetRevenue: z.number(), depositIncome: z.number(), bondIncome: z.number(),
+    livingExpenses: z.number(), operatingCosts: z.number(), assetDebtPayments: z.number(),
+    loanPayments: z.number(), netCashflow: z.number(), endingCash: z.number(),
+  }).nullable().optional(),
 })
 
 export const SAVE_KEY = 'vyhod-iz-kruga-save-v2'
@@ -29,7 +35,7 @@ export const loadGame = (): GameState | null => {
     const raw = localStorage.getItem(SAVE_KEY)
     if (!raw) return null
     const parsed = saveSchema.safeParse(JSON.parse(raw))
-    return parsed.success ? parsed.data as GameState : null
+    return parsed.success ? { ...parsed.data, lastMonthlyReport: parsed.data.lastMonthlyReport ?? null } as GameState : null
   } catch {
     return null
   }

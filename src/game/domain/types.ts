@@ -26,6 +26,7 @@ export interface BusinessTemplate {
 export interface Asset extends BusinessTemplate {
   ownerId: PlayerId
   ownership: number
+  marketValue?: number
   monthlyPayment: number
   purchaseMonth: number
 }
@@ -71,6 +72,21 @@ export interface GameEvent {
   tone?: 'good' | 'bad' | 'neutral'
 }
 
+export interface MonthlyReport {
+  month: number
+  startingCash: number
+  salary: number
+  assetRevenue: number
+  depositIncome: number
+  bondIncome: number
+  livingExpenses: number
+  operatingCosts: number
+  assetDebtPayments: number
+  loanPayments: number
+  netCashflow: number
+  endingCash: number
+}
+
 export interface GameState {
   version: 2
   seed: number
@@ -83,6 +99,7 @@ export interface GameState {
   players: Player[]
   pendingDecision: Decision | null
   events: GameEvent[]
+  lastMonthlyReport: MonthlyReport | null
 }
 
 export type Funding = 'cash' | 'credit' | 'partner30' | 'partner50'
@@ -91,6 +108,7 @@ export type GameCommand =
   | { type: 'START_GAME'; professionId: string; botCount?: number; seed?: number }
   | { type: 'ROLL_DICE' }
   | { type: 'BUY_BUSINESS'; funding: Funding }
+  | { type: 'SELL_ASSET'; assetId: string }
   | { type: 'SKIP_DECISION' }
   | { type: 'PAY_EXPENSE'; withCredit?: boolean }
   | { type: 'TAKE_CHANCE' }

@@ -1,6 +1,6 @@
 import { board, businesses, chanceCards, expenseCards, professions } from '../content/content'
 import type { Asset, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
-import { isFinanciallyFree, monthlyCashflow } from '../systems/economy'
+import { assetMarketValue, assetSaleProceeds, createMonthlyReport, isFinanciallyFree, monthlyCashflow } from '../systems/economy'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
   version: 2,
@@ -14,6 +14,7 @@ export const emptyGame = (seed = Date.now()): GameState => ({
   players: [],
   pendingDecision: null,
   events: [],
+  lastMonthlyReport: null,
 })
 
 const random = (state: GameState) => {
@@ -63,10 +64,12 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
 }
 
 const settleMonth = (state: GameState) => {
+  const humanReport = createMonthlyReport(state.players[0], state.month)
   state.month += 1
   state.day = 1
   state.players.forEach((player) => { player.cash += monthlyCashflow(player) })
-  addEvent(state, 'Новый месяц', `Твой денежный поток: ${monthlyCashflow(state.players[0]).toLocaleString('ru-RU')} ₽`, monthlyCashflow(state.players[0]) >= 0 ? 'good' : 'bad')
+  state.lastMonthlyReport = humanReport
+  addEvent(state, 'Итоги месяца', `Чистый результат: ${humanReport.netCashflow.toLocaleString('ru-RU')} ₽`, humanReport.netCashflow >= 0 ? 'good' : 'bad')
 }
 
 const advanceCalendar = (state: GameState) => {
@@ -156,6 +159,19 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
 
   if (state.phase === 'setup' || state.phase === 'victory') return reject(current, 'Команда сейчас недоступна')
   const player = state.players[0]
+
+  if (command.type === 'SELL_ASSET') {
+    if (state.phase !== 'ready') return reject(current, 'Сначала заверши текущее решение')
+    const assetIndex = player.assets.findIndex((asset) => asset.id === command.assetId)
+    if (assetIndex < 0) return reject(current, 'Актив не найден')
+    const asset = player.assets[assetIndex]
+    const marketValue = assetMarketValue(asset)
+    const proceeds = assetSaleProceeds(asset)
+    player.cash += proceeds
+    player.assets.splice(assetIndex, 1)
+    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽`, proceeds >= asset.downPayment ? 'good' : 'neutral')
+    return { state, accepted: true }
+  }
 
   if (command.type === 'ROLL_DICE') {
     if (state.phase !== 'ready') return reject(current, 'Сначала заверши текущее решение')

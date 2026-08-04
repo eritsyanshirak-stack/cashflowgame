@@ -2,8 +2,8 @@ import { useState } from 'react'
 import './App.css'
 import './premium.css'
 import { board, businesses, professions } from './game/content/content'
-import type { Decision, Funding, GameCommand } from './game/domain/types'
-import { assetCashflow, monthlyCashflow, monthlyExpenses, netWorth, passiveIncome, totalDebt } from './game/systems/economy'
+import type { Decision, Funding, GameCommand, MonthlyReport } from './game/domain/types'
+import { assetCashflow, assetMarketValue, assetSaleProceeds, monthlyCashflow, monthlyExpenses, netWorth, passiveIncome, totalDebt } from './game/systems/economy'
 import { hasSave } from './game/persistence/save'
 import { useGameStore } from './store/gameStore'
 
@@ -53,8 +53,10 @@ function GameScreen() {
   const resetGame = useGameStore((store) => store.resetGame)
   const error = useGameStore((store) => store.error)
   const [tab, setTab] = useState<'board' | 'assets' | 'journal'>('board')
+  const [dismissedReportMonth, setDismissedReportMonth] = useState<number | null>(null)
   const player = game.players[0]
   const freedom = Math.min(100, Math.round((passiveIncome(player) / Math.max(1, monthlyExpenses(player))) * 100))
+  const report = game.lastMonthlyReport
 
   return <main className="game-shell">
     <header className="topbar">
@@ -79,6 +81,7 @@ function GameScreen() {
 
     {error && <div className="toast">{error}</div>}
     {game.pendingDecision && <DecisionSheet decision={game.pendingDecision} dispatch={dispatch} />}
+    {report && dismissedReportMonth !== report.month && <MonthlyReportSheet report={report} onClose={() => setDismissedReportMonth(report.month)} />}
     {game.phase === 'victory' && <Victory onReset={resetGame} />}
 
     <nav className="bottom-nav">
@@ -114,16 +117,38 @@ function Board({ onRoll }: { onRoll: () => void }) {
 }
 
 function Assets() {
-  const player = useGameStore((store) => store.game.players[0])
+  const game = useGameStore((store) => store.game)
+  const dispatch = useGameStore((store) => store.dispatch)
+  const player = game.players[0]
   return <section className="content-section">
     <div className="section-heading"><span className="eyebrow">ПОРТФЕЛЬ</span><h2>Твои активы</h2></div>
     <div className="summary-line"><span>Денежный поток</span><strong className={monthlyCashflow(player) >= 0 ? 'good' : 'bad'}>{money(monthlyCashflow(player))}/мес</strong></div>
     <div className="summary-line"><span>Общий долг</span><strong>{money(totalDebt(player))}</strong></div>
-    {player.assets.length === 0 ? <div className="empty-state"><span>◇</span><h3>Активов пока нет</h3><p>Ищи сделки с положительным потоком. Цена сама по себе ничего не говорит.</p></div> : player.assets.map((asset) => <article className="asset-card" key={asset.id}>
-      <div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}%</small><h3>{asset.name}</h3><strong className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес</strong></div>
+    {player.assets.length === 0 ? <div className="empty-state"><span>◇</span><h3>Активов пока нет</h3><p>Ищи сделки с положительным потоком. Цена сама по себе ничего не говорит.</p></div> : player.assets.map((asset) => <article className="asset-card asset-card-detailed" key={asset.id}>
+      <div className="asset-main"><div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}%</small><h3>{asset.name}</h3><strong className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес</strong></div></div>
+      <div className="asset-facts"><span>Рыночная стоимость <b>{money(assetMarketValue(asset))}</b></span><span>Остаток долга <b>{money(asset.loan)}</b></span><span>Получишь при продаже <b>{money(assetSaleProceeds(asset))}</b></span></div>
+      <button className="sell-button" disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'SELL_ASSET', assetId: asset.id })}>Продать актив</button>
     </article>)}
     <div className="saving-card"><Metric label="Депозит" value={money(player.deposit)} /><Metric label="Облигации" value={money(player.bonds)} /></div>
   </section>
+}
+
+function ReportLine({ label, value, income }: { label: string; value: number; income?: boolean }) {
+  if (value === 0) return null
+  return <div className="report-line"><span>{label}</span><strong className={income ? 'good' : 'bad'}>{income ? '+' : '-'}{money(value)}</strong></div>
+}
+
+function MonthlyReportSheet({ report, onClose }: { report: MonthlyReport; onClose: () => void }) {
+  return <div className="sheet-backdrop report-backdrop"><section className="decision-sheet report-sheet">
+    <div className="sheet-handle" />
+    <span className="eyebrow">МЕСЯЦ {report.month} ЗАКРЫТ</span>
+    <h2>Куда ушли деньги</h2>
+    <div className="report-balance"><span>Было в начале</span><strong>{money(report.startingCash)}</strong></div>
+    <div className="report-group"><small>ДОХОДЫ</small><ReportLine label="Зарплата" value={report.salary} income /><ReportLine label="Доход активов" value={report.assetRevenue} income /><ReportLine label="Проценты по депозиту" value={report.depositIncome} income /><ReportLine label="Доход облигаций" value={report.bondIncome} income /></div>
+    <div className="report-group"><small>РАСХОДЫ</small><ReportLine label="Жизнь и обязательные платежи" value={report.livingExpenses} /><ReportLine label="Содержание активов" value={report.operatingCosts} /><ReportLine label="Долги активов" value={report.assetDebtPayments} /><ReportLine label="Другие кредиты" value={report.loanPayments} /></div>
+    <div className="report-result"><div><span>Итог месяца</span><strong className={report.netCashflow >= 0 ? 'good' : 'bad'}>{report.netCashflow >= 0 ? '+' : ''}{money(report.netCashflow)}</strong></div><div><span>Денег сейчас</span><strong>{money(report.endingCash)}</strong></div></div>
+    <button className="primary-action" onClick={onClose}>Продолжить игру <span>→</span></button>
+  </section></div>
 }
 
 function Journal() {

@@ -101,6 +101,12 @@ describe('game engine', () => {
     expect(current.month).toBe(2)
     expect(current.round).toBe(7)
     expect(current.players[0].cash).toBe(initialCash + monthlyCashflow(game.players[0]))
+    expect(current.lastMonthlyReport).toMatchObject({
+      month: 1,
+      startingCash: initialCash,
+      netCashflow: monthlyCashflow(game.players[0]),
+      endingCash: current.players[0].cash,
+    })
   })
 
   it('does not let bot count accelerate the calendar', () => {
@@ -118,5 +124,32 @@ describe('game engine', () => {
     expect(threeBotsResult.day).toBe(5)
     expect(oneBotResult.round).toBe(1)
     expect(threeBotsResult.round).toBe(1)
+  })
+
+  it('sells an asset, clears its debt and credits only the remaining equity', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const business = businesses.find((item) => item.id === 'coffee')!
+    player.assets.push({ ...business, ownerId: player.id, ownership: 1, monthlyPayment: 4_950, purchaseMonth: 1 })
+
+    const result = executeCommand(game, { type: 'SELL_ASSET', assetId: player.assets[0].id })
+
+    expect(result.accepted).toBe(true)
+    expect(result.state.players[0].assets).toHaveLength(0)
+    expect(result.state.players[0].cash).toBe(300_000)
+  })
+
+  it('does not allow selling an asset while another decision is open', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const business = businesses[0]
+    player.assets.push({ ...business, ownerId: player.id, ownership: 1, monthlyPayment: 0, purchaseMonth: 1 })
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'salary' }
+
+    const result = executeCommand(game, { type: 'SELL_ASSET', assetId: player.assets[0].id })
+
+    expect(result.accepted).toBe(false)
+    expect(result.state.players[0].assets).toHaveLength(1)
   })
 })
