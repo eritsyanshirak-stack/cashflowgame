@@ -1,6 +1,6 @@
 export type PlayerId = string
 export type Phase = 'setup' | 'ready' | 'decision' | 'finished'
-export type CellType = 'salary' | 'business' | 'market' | 'expense' | 'chance' | 'bank' | 'growth'
+export type CellType = 'salary' | 'business' | 'market' | 'expense' | 'chance' | 'bank' | 'growth' | 'contract' | 'auction' | 'partnership' | 'management'
 export type Difficulty = 'easy' | 'normal' | 'hard'
 export type BotStrategy = 'careful' | 'balanced' | 'aggressive'
 export type RiskRating = 'low' | 'medium' | 'high'
@@ -57,6 +57,11 @@ export interface Asset extends BusinessTemplate {
   missedPayments?: number
   legalIssue?: string
   issueCost?: number
+  listingPrice?: number | null
+  listingStartedMonth?: number | null
+  listingExpiresMonth?: number | null
+  insuredUntilMonth?: number | null
+  externalRevenueMultiplier?: number
 }
 
 export interface Loan {
@@ -67,6 +72,8 @@ export interface Loan {
   annualRate: number
   termMonths: number
   collateralAssetId?: string
+  collateralStockId?: string
+  collateralStockQuantity?: number
   missedPayments?: number
 }
 
@@ -84,6 +91,7 @@ export interface StockHolding {
   stockId: string
   quantity: number
   averagePrice: number
+  pledgedQuantity?: number
 }
 
 export interface ResaleDeal {
@@ -95,6 +103,16 @@ export interface ResaleDeal {
   resolvesMonth: number
   outcomeAmount: number
   delays: number
+}
+
+export interface ActiveContract {
+  id: string
+  title: string
+  investment: number
+  payout: number
+  resolvesMonth: number
+  successChance: number
+  skillId: SkillId
 }
 
 export interface Player {
@@ -113,6 +131,7 @@ export interface Player {
   bonds: number
   stocks: StockHolding[]
   resaleDeals: ResaleDeal[]
+  activeContracts: ActiveContract[]
   experience: number
   skills: SkillProgress
   status: PlayerStatus
@@ -127,11 +146,68 @@ export interface GameOutcome {
   reason: 'freedom' | 'human-bankrupt' | 'last-solvent'
 }
 
+export interface ExpenseOption {
+  id: 'full' | 'economy' | 'challenge'
+  title: string
+  description: string
+  amount: number
+  riskChance?: number
+  riskAmount?: number
+}
+
+export interface ContractOption {
+  id: 'safe' | 'balanced' | 'bold'
+  title: string
+  investment: number
+  payout: number
+  durationMonths: number
+  successChance: number
+  skillId: SkillId
+}
+
+export interface GlobalEvent {
+  id: string
+  title: string
+  description: string
+  category: string | null
+  sector: string | null
+  revenueMultiplier: number
+  stockImpact: number
+  creditRateDelta: number
+  startsMonth: number
+  expiresMonth: number
+}
+
+export interface BuyerOffer {
+  id: string
+  assetId: string
+  buyerName: string
+  askingPrice: number
+  offeredPrice: number
+  marketValue: number
+  round: 1 | 2
+  final: boolean
+  expiresMonth: number
+}
+
+export interface MarginCall {
+  stockId: string
+  loanId: string
+  pledgedQuantity: number
+  marketValue: number
+  balance: number
+  requiredPayment: number
+}
+
 export type Decision =
   | { kind: 'business'; businessId: string; askingPrice: number; negotiated: boolean; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean }
   | { kind: 'opportunity'; opportunityId: string; businessId: string; askingPrice: number; title: string; description: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean }
-  | { kind: 'expense'; title: string; amount: number }
+  | { kind: 'expense'; title: string; amount: number; options?: ExpenseOption[] }
   | { kind: 'chance'; title: string; investment: number; minReturn: number; maxReturn: number; durationMonths: number }
+  | { kind: 'contract'; title: string; description: string; options: ContractOption[] }
+  | { kind: 'auction'; businessId: string; title: string; currentBid: number; marketValue: number; minimumStep: number; inspected: boolean; issue?: BusinessIssue; issueRevealed?: boolean; botCeilings: number[]; leadingBot: number | null }
+  | { kind: 'partnership'; businessId: string; title: string; description: string; discount: number }
+  | { kind: 'management' }
   | { kind: 'market'; title: string; description: string }
   | { kind: 'bank' }
   | { kind: 'growth' }
@@ -155,6 +231,7 @@ export interface MonthlyReport {
   bondIncome: number
   stockDividends: number
   resaleReturns: number
+  contractReturns?: number
   livingExpenses: number
   operatingCosts: number
   assetDebtPayments: number
@@ -163,8 +240,16 @@ export interface MonthlyReport {
   endingCash: number
 }
 
+export interface RecentCards {
+  business: string[]
+  expense: string[]
+  chance: string[]
+  contract: string[]
+  global: string[]
+}
+
 export interface GameState {
-  version: 8
+  version: 9
   seed: number
   phase: Phase
   day: number
@@ -179,10 +264,15 @@ export interface GameState {
   difficulty: Difficulty
   stockMarket: StockQuote[]
   marketHeadline: string
+  globalEvent: GlobalEvent | null
+  recentCards: RecentCards
+  buyerOffers: BuyerOffer[]
+  activeMarginCall: MarginCall | null
   outcome: GameOutcome | null
 }
 
 export type Funding = 'cash' | 'credit' | 'secured' | 'partner30' | 'partner50'
+export type BuyerOfferAction = 'accept' | 'reject' | 'counter5' | 'counter10' | 'counter15'
 
 export type GameCommand =
   | { type: 'START_GAME'; professionId: string; botCount?: number; difficulty?: Difficulty; seed?: number }
@@ -192,6 +282,10 @@ export type GameCommand =
   | { type: 'BUY_BUSINESS'; funding: Funding; collateralAssetId?: string; saleAssetIds?: string[] }
   | { type: 'BUY_OPPORTUNITY'; funding: Funding; collateralAssetId?: string; saleAssetIds?: string[] }
   | { type: 'SELL_ASSET'; assetId: string }
+  | { type: 'SELL_ASSET_SHARE'; assetId: string; percent: 10 | 25 | 50 }
+  | { type: 'LIST_ASSET'; assetId: string; askingPrice: number }
+  | { type: 'CANCEL_ASSET_LISTING'; assetId: string }
+  | { type: 'RESPOND_BUYER_OFFER'; offerId: string; action: BuyerOfferAction }
   | { type: 'ACCEPT_SALE_OFFER'; assetId: string }
   | { type: 'DEVELOP_ASSET'; assetId: string; developmentId: string }
   | { type: 'RESOLVE_ASSET_ISSUE'; assetId: string }
@@ -199,13 +293,22 @@ export type GameCommand =
   | { type: 'SELL_PARTNER_SHARE'; assetId: string }
   | { type: 'SKIP_DECISION' }
   | { type: 'PAY_EXPENSE'; withCredit?: boolean }
+  | { type: 'RESOLVE_EXPENSE'; optionId: ExpenseOption['id']; withCredit?: boolean }
   | { type: 'TAKE_CHANCE' }
+  | { type: 'TAKE_CONTRACT'; optionId: ContractOption['id'] }
+  | { type: 'AUCTION_INSPECT' }
+  | { type: 'AUCTION_BID'; amount: number }
+  | { type: 'AUCTION_WITHDRAW' }
+  | { type: 'ACCEPT_PARTNERSHIP'; ownership: 0.3 | 0.5 }
+  | { type: 'MANAGEMENT_ACTION'; action: 'refinance' | 'insure'; assetId?: string }
   | { type: 'DEPOSIT'; amount: number }
   | { type: 'WITHDRAW_DEPOSIT'; amount: number }
   | { type: 'BUY_BONDS'; amount: number }
   | { type: 'SELL_BONDS'; amount: number }
-  | { type: 'BUY_STOCK'; stockId: string; quantity: number }
+  | { type: 'BUY_STOCK'; stockId: string; quantity: number; funding?: 'cash' | 'credit' | 'secured'; collateralAssetId?: string; saleAssetIds?: string[]; shareSaleAssetId?: string; shareSalePercent?: 10 | 25 | 50 }
   | { type: 'SELL_STOCK'; stockId: string; quantity: number }
+  | { type: 'PLEDGE_STOCK'; stockId: string; percent: 25 | 50 | 75 | 100 }
+  | { type: 'RESOLVE_MARGIN_CALL'; action: 'pay' | 'sell' | 'close' }
   | { type: 'TAKE_LOAN'; amount: number; collateralAssetId?: string }
   | { type: 'REPAY_LOAN'; amount: number }
   | { type: 'TRAIN'; skillId: SkillId }
