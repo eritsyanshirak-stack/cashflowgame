@@ -1,0 +1,194 @@
+.stock-sale-portal-mount {
+  margin-top: 12px;
+}
+
+.stock-sale-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dfe4e1;
+  border-radius: 16px;
+  background: #f7faf8;
+}
+
+.stock-sale-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stock-sale-title span {
+  display: grid;
+  gap: 2px;
+}
+
+.stock-sale-title small {
+  color: #176b4d;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .13em;
+}
+
+.stock-sale-title b {
+  color: #17191d;
+  font-size: 13px;
+}
+
+.stock-sale-title em {
+  color: #7b8086;
+  font-size: 8px;
+  font-style: normal;
+  text-align: right;
+}
+
+.stock-sale-list {
+  display: grid;
+  gap: 10px;
+}
+
+.stock-sale-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e1e5e3;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(23, 31, 27, .04);
+}
+
+.stock-sale-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stock-sale-head > span,
+.stock-sale-head > strong {
+  display: grid;
+  gap: 2px;
+}
+
+.stock-sale-head b {
+  color: #17191d;
+  font-size: 12px;
+}
+
+.stock-sale-head small {
+  color: #7a7f85;
+  font-size: 8px;
+}
+
+.stock-sale-head > strong {
+  font-size: 13px;
+  text-align: right;
+}
+
+.stock-sale-head > strong small {
+  color: inherit;
+  font-weight: 800;
+}
+
+.stock-sale-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #e6e9e7;
+}
+
+.stock-sale-facts span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  color: #777c82;
+  background: #f7f8f8;
+  font-size: 8px;
+}
+
+.stock-sale-facts b {
+  overflow: hidden;
+  color: #25292e;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-sale-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.stock-sale-result.good {
+  color: #176b4d;
+  background: #eaf4ef;
+}
+
+.stock-sale-result.bad {
+  color: #bd3d3d;
+  background: #fceceb;
+}
+
+.stock-sale-result b {
+  font-size: 11px;
+  text-align: right;
+}
+
+.stock-sale-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stock-sale-actions button {
+  display: grid;
+  gap: 3px;
+  min-height: 46px;
+  padding: 9px 10px;
+  color: #2c3136;
+  text-align: left;
+  border: 1px solid #dfe3e1;
+  border-radius: 11px;
+  background: #f4f6f5;
+}
+
+.stock-sale-actions button:last-child {
+  color: #fff;
+  border-color: #176b4d;
+  background: #176b4d;
+}
+
+.stock-sale-actions b {
+  font-size: 10px;
+}
+
+.stock-sale-actions small {
+  color: inherit;
+  opacity: .78;
+  font-size: 8px;
+}
+
+@media (max-width: 390px) {
+  .stock-sale-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stock-sale-title em {
+    text-align: left;
+  }
+
+  .stock-sale-actions {
+    grid-template-columns: 1fr;
+  }
+}
