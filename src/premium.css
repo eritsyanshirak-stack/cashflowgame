@@ -287,6 +287,51 @@ h1 em { -webkit-text-stroke-color: var(--acid); }
 .partner-actions span { grid-column: 1 / -1; color: #656a71; font-size: 9px; }
 .partner-actions button { min-height: 35px; color: #363b40; background: #fff; border: 1px solid #dfe2e4; border-radius: 8px; font-size: 8px; font-weight: 800; }
 .partner-actions button:disabled { opacity: .4; }
+.bank-verdict {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  margin: 9px 0;
+  border-radius: 12px;
+}
+.bank-verdict > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bank-verdict small { font-size: 7px; letter-spacing: .1em; }
+.bank-verdict b { font-size: 11px; }
+.bank-verdict span { font-size: 9px; line-height: 1.35; }
+.bank-verdict.approved { color: #176b4d; background: #edf4f1; }
+.bank-verdict.declined { color: #8e3a33; background: #fff0ef; }
+.primary-action:disabled { color: #989ca1; background: #e2e4e6; }
+.funding-actions { display: grid; gap: 7px; margin-top: 8px; }
+.funding-actions > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 9px 11px;
+  text-align: left;
+  color: #30343a;
+  background: #f4f5f6;
+  border: 1px solid #e1e3e6;
+  border-radius: 11px;
+}
+.funding-actions b, .funding-actions small { display: block; }
+.funding-actions b { font-size: 10px; }
+.funding-actions small { color: #747980; font-size: 8px; text-align: right; }
+.funding-actions > button:disabled { opacity: .42; }
+.credit-profile { display: grid; grid-template-columns: .7fr .8fr 1.5fr; gap: 1px; margin: 16px 0 9px; overflow: hidden; background: #e2e5e7; border-radius: 12px; }
+.credit-profile > div { min-width: 0; padding: 10px; background: #f5f6f7; }
+.credit-profile small, .credit-profile strong { display: block; }
+.credit-profile small { min-height: 20px; color: #858a90; font-size: 6px; letter-spacing: .06em; }
+.credit-profile strong { overflow: hidden; color: #202429; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.pledge-badge { padding: 7px 9px; margin-top: 10px; color: #8b5b17; background: #fff6e6; border-radius: 8px; font-size: 8px; font-weight: 800; }
+.loan-list { padding: 12px; margin-top: 12px; background: #fff; border: 1px solid #e5e7ea; border-radius: 14px; }
+.loan-list > small { display: block; margin-bottom: 6px; color: #92969c; font-size: 7px; font-weight: 800; letter-spacing: .13em; }
+.loan-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid #eceef0; }
+.loan-list > div span, .loan-list > div b, .loan-list > div small, .loan-list > div strong { display: block; }
+.loan-list > div b { color: #30343a; font-size: 9px; }
+.loan-list > div small { margin-top: 2px; color: #858a90; font-size: 7px; }
+.loan-list > div strong { color: #30343a; font-size: 10px; text-align: right; }
 
 @media (max-width: 370px) {
   .hero-stats { margin-inline: 9px; }

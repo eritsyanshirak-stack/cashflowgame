@@ -44,6 +44,9 @@ export interface Loan {
   name: string
   balance: number
   monthlyPayment: number
+  annualRate: number
+  termMonths: number
+  collateralAssetId?: string
 }
 
 export interface Player {
@@ -97,7 +100,7 @@ export interface MonthlyReport {
 }
 
 export interface GameState {
-  version: 3
+  version: 4
   seed: number
   phase: Phase
   day: number
@@ -112,13 +115,13 @@ export interface GameState {
   difficulty: Difficulty
 }
 
-export type Funding = 'cash' | 'credit' | 'partner30' | 'partner50'
+export type Funding = 'cash' | 'credit' | 'secured' | 'partner30' | 'partner50'
 
 export type GameCommand =
   | { type: 'START_GAME'; professionId: string; botCount?: number; difficulty?: Difficulty; seed?: number }
   | { type: 'ROLL_DICE' }
   | { type: 'NEGOTIATE_BUSINESS'; offerPercent: 0.85 | 0.9 | 0.95 }
-  | { type: 'BUY_BUSINESS'; funding: Funding }
+  | { type: 'BUY_BUSINESS'; funding: Funding; collateralAssetId?: string }
   | { type: 'SELL_ASSET'; assetId: string }
   | { type: 'ACCEPT_SALE_OFFER'; assetId: string }
   | { type: 'DEVELOP_ASSET'; assetId: string; developmentId: string }
@@ -131,7 +134,7 @@ export type GameCommand =
   | { type: 'WITHDRAW_DEPOSIT'; amount: number }
   | { type: 'BUY_BONDS'; amount: number }
   | { type: 'SELL_BONDS'; amount: number }
-  | { type: 'TAKE_LOAN'; amount: number }
+  | { type: 'TAKE_LOAN'; amount: number; collateralAssetId?: string }
   | { type: 'REPAY_LOAN'; amount: number }
   | { type: 'TRAIN'; cost: number }
 

@@ -221,4 +221,68 @@ describe('game engine', () => {
     expect(result.state.players[0].assets).toHaveLength(0)
     expect(result.state.players[0].cash).toBe(370_000)
   })
+
+  it('approves only the missing acquisition amount and records real loan terms', () => {
+    const game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'business', businessId: 'pickup', askingPrice: 620_000, negotiated: false }
+    game.players[0].cash = 100_000
+
+    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })
+
+    expect(result.accepted).toBe(true)
+    expect(result.state.players[0].cash).toBe(0)
+    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 80_000, annualRate: 0.25, termMonths: 36 })
+    expect(result.state.players[0].loans[0].monthlyPayment).toBeGreaterThan(0)
+  })
+
+  it('rejects a loan larger than the bank limit without changing cash', () => {
+    const game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'bank' }
+
+    const result = executeCommand(game, { type: 'TAKE_LOAN', amount: 5_000_000 })
+
+    expect(result.accepted).toBe(false)
+    expect(result.state.players[0].cash).toBe(150_000)
+    expect(result.state.players[0].loans).toHaveLength(0)
+  })
+
+  it('prevents double collateral and settles the secured loan when the asset is sold', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    player.assets.push(testAsset('vending', player.id))
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'bank' }
+
+    const firstLoan = executeCommand(game, { type: 'TAKE_LOAN', amount: 40_000, collateralAssetId: player.assets[0].id })
+    const secondLoan = executeCommand(firstLoan.state, { type: 'TAKE_LOAN', amount: 10_000, collateralAssetId: player.assets[0].id })
+    expect(firstLoan.accepted).toBe(true)
+    expect(secondLoan.accepted).toBe(false)
+
+    firstLoan.state.phase = 'ready'
+    firstLoan.state.pendingDecision = null
+    const sale = executeCommand(firstLoan.state, { type: 'SELL_ASSET', assetId: player.assets[0].id })
+    expect(sale.accepted).toBe(true)
+    expect(sale.state.players[0].loans).toHaveLength(0)
+    expect(sale.state.players[0].cash).toBe(240_000)
+  })
+
+  it('keeps an unpaid collateral shortfall as debt after a distressed sale', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const asset = testAsset('vending', player.id)
+    player.assets.push(asset)
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'bank' }
+    const loan = executeCommand(game, { type: 'TAKE_LOAN', amount: 40_000, collateralAssetId: asset.id }).state
+    loan.players[0].assets[0].marketValue = 20_000
+    loan.phase = 'ready'
+    loan.pendingDecision = null
+
+    const sale = executeCommand(loan, { type: 'SELL_ASSET', assetId: asset.id })
+
+    expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 20_000, collateralAssetId: undefined })
+    expect(sale.state.players[0].cash).toBe(190_000)
+  })
 })

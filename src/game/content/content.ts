@@ -7,10 +7,13 @@ export const difficultySettings: Record<Difficulty, {
   marketVolatility: number
   offerChance: number
   botActivity: number
+  maxDebtLoad: number
+  unsecuredRate: number
+  securedRate: number
 }> = {
-  easy: { label: 'Спокойно', description: 'Рынок мягче, торг проще', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48 },
-  normal: { label: 'Баланс', description: 'Честная конкуренция', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.68 },
-  hard: { label: 'Жёстко', description: 'Сильные боты и нервный рынок', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86 },
+  easy: { label: 'Спокойно', description: 'Рынок мягче, торг проще', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48, maxDebtLoad: 0.9, unsecuredRate: 0.2, securedRate: 0.14 },
+  normal: { label: 'Баланс', description: 'Честная конкуренция', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.68, maxDebtLoad: 0.82, unsecuredRate: 0.25, securedRate: 0.18 },
+  hard: { label: 'Жёстко', description: 'Сильные боты и нервный рынок', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86, maxDebtLoad: 0.76, unsecuredRate: 0.31, securedRate: 0.23 },
 }
 
 export const developments = [

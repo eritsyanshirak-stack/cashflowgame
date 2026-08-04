@@ -1,9 +1,9 @@
 import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, professions } from '../content/content'
 import type { Asset, BotStrategy, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
-import { assetCashflow, assetMarketValue, assetSaleProceeds, createMonthlyReport, isFinanciallyFree, monthlyCashflow } from '../systems/economy'
+import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isFinanciallyFree, loanPayment, monthlyCashflow, pledgedLoanForAsset } from '../systems/economy'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 3,
+  version: 4,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -89,7 +89,8 @@ const updateAssetMarket = (state: GameState, player: Player) => {
   })
   player.loans.forEach((loan) => {
     loan.balance = Math.max(0, loan.balance - Math.round(loan.monthlyPayment * 0.72))
-    loan.monthlyPayment = loan.balance > 0 ? Math.min(loan.monthlyPayment, Math.round(loan.balance * 0.05)) : 0
+    loan.termMonths = Math.max(0, loan.termMonths - 1)
+    loan.monthlyPayment = loan.balance > 0 ? Math.min(loan.monthlyPayment, loanPayment(loan.balance, loan.annualRate, Math.max(1, loan.termMonths))) : 0
   })
   player.loans = player.loans.filter((loan) => loan.balance > 0)
 }
@@ -112,7 +113,7 @@ const advanceCalendar = (state: GameState) => {
   if (state.day >= 30) settleMonth(state)
 }
 
-const makeAsset = (state: GameState, player: Player, businessId: string, funding: Funding, dealPrice?: number): Asset | null => {
+const makeAsset = (state: GameState, player: Player, businessId: string, funding: Funding, dealPrice?: number, collateralAssetId?: string): Asset | null => {
   const business = businesses.find((item) => item.id === businessId)
   if (!business) return null
   const ownership = funding === 'partner30' ? 0.7 : funding === 'partner50' ? 0.5 : 1
@@ -120,8 +121,23 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
   const downPayment = Math.round(Math.max(0, purchasePrice - business.loan) * ownership)
   const acquisitionGap = Math.max(0, downPayment - player.cash)
   if (funding === 'cash' && acquisitionGap > 0) return null
-  if (funding === 'credit' && acquisitionGap > 0) {
-    player.loans.push({ id: uid(state, 'loan'), name: `Взнос: ${business.name}`, balance: acquisitionGap, monthlyPayment: Math.round(acquisitionGap * 0.035) })
+  if ((funding === 'partner30' || funding === 'partner50') && acquisitionGap > 0) return null
+  if ((funding === 'credit' || funding === 'secured') && acquisitionGap > 0) {
+    const collateral = funding === 'secured' ? player.assets.find((asset) => asset.id === collateralAssetId) : undefined
+    if (funding === 'secured' && !collateral) return null
+    const projectedIncome = Math.round((business.revenue - business.operatingCosts) * ownership)
+    const projectedAssetPayment = Math.round(business.loan * ownership * 0.015)
+    const assessment = assessLoan(player, acquisitionGap, state.difficulty, collateral, projectedIncome, projectedAssetPayment)
+    if (!assessment.approved) return null
+    player.loans.push({
+      id: uid(state, 'loan'),
+      name: funding === 'secured' ? `Залог: ${collateral!.name}` : `Взнос: ${business.name}`,
+      balance: acquisitionGap,
+      monthlyPayment: assessment.monthlyPayment,
+      annualRate: assessment.annualRate,
+      termMonths: assessment.termMonths,
+      collateralAssetId: collateral?.id,
+    })
     player.cash += acquisitionGap
   }
   player.cash -= downPayment
@@ -157,6 +173,23 @@ const applyDevelopment = (asset: Asset, developmentId: string, cost: number) => 
   asset.developmentLevel += 1
   asset.totalDevelopmentCost += cost
   return true
+}
+
+const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
+  const collateralLoan = pledgedLoanForAsset(player, asset.id)
+  const collateralDebt = collateralLoan?.balance ?? 0
+  const equityBeforeCollateral = Math.max(0, grossPrice - asset.loan)
+  const collateralPayment = Math.min(equityBeforeCollateral, collateralDebt)
+  const proceeds = equityBeforeCollateral - collateralPayment
+  if (collateralLoan) {
+    collateralLoan.balance -= collateralPayment
+    collateralLoan.collateralAssetId = undefined
+    collateralLoan.monthlyPayment = collateralLoan.balance > 0 ? loanPayment(collateralLoan.balance, collateralLoan.annualRate, Math.max(1, collateralLoan.termMonths)) : 0
+    if (collateralLoan.balance === 0) player.loans = player.loans.filter((loan) => loan.id !== collateralLoan.id)
+  }
+  player.cash += proceeds
+  player.assets = player.assets.filter((item) => item.id !== asset.id)
+  return { proceeds, collateralPayment }
 }
 
 const runBots = (state: GameState) => {
@@ -290,10 +323,8 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
     const marketValue = assetMarketValue(asset)
-    const proceeds = assetSaleProceeds(asset)
-    player.cash += proceeds
-    player.assets.splice(assetIndex, 1)
-    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽`, proceeds >= asset.downPayment ? 'good' : 'neutral')
+    const { proceeds, collateralPayment } = sellAsset(player, asset, marketValue)
+    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, банку ${(asset.loan + collateralPayment).toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽`, proceeds >= asset.downPayment ? 'good' : 'neutral')
     return { state, accepted: true }
   }
 
@@ -303,9 +334,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
     if (!asset.saleOffer || asset.offerExpiresMonth !== state.month) return reject(current, 'Предложение уже недоступно')
-    const proceeds = Math.max(0, asset.saleOffer - asset.loan)
-    player.cash += proceeds
-    player.assets.splice(assetIndex, 1)
+    const { proceeds } = sellAsset(player, asset, asset.saleOffer)
     addEvent(state, 'Предложение принято', `${asset.name}: на руки ${proceeds.toLocaleString('ru-RU')} ₽`, 'good')
     return { state, accepted: true }
   }
@@ -355,8 +384,8 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
 
   if (command.type === 'BUY_BUSINESS') {
     if (decision.kind !== 'business') return reject(current, 'Сейчас нет сделки')
-    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice)
-    if (!asset) return reject(current, 'Не хватает денег для этой покупки')
+    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId)
+    if (!asset) return reject(current, command.funding === 'cash' ? 'Не хватает своих денег' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил эту схему финансирования')
     player.assets.push(asset)
     addEvent(state, 'Новый актив', `${asset.name}, доля ${Math.round(asset.ownership * 100)}%`, 'good')
     completeHumanTurn(state)
@@ -368,7 +397,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (command.withCredit || player.cash < decision.amount) {
       const borrowed = command.withCredit ? decision.amount : decision.amount - player.cash
       if (!command.withCredit) player.cash = 0
-      player.loans.push({ id: uid(state, 'expense-loan'), name: decision.title, balance: borrowed, monthlyPayment: Math.round(borrowed * 0.05) })
+      player.loans.push({ id: uid(state, 'expense-loan'), name: decision.title, balance: borrowed, monthlyPayment: Math.round(borrowed * 0.05), annualRate: 0.42, termMonths: 24 })
     } else player.cash -= decision.amount
     addEvent(state, 'Непредвиденный расход', `${decision.title}: ${decision.amount.toLocaleString('ru-RU')} ₽`, 'bad')
     completeHumanTurn(state)
@@ -405,8 +434,11 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   if (command.type === 'TAKE_LOAN') {
     if (decision.kind !== 'bank') return reject(current, 'Кредит можно взять только в банке')
     if (command.amount <= 0) return reject(current, 'Некорректная сумма')
+    const collateral = command.collateralAssetId ? player.assets.find((asset) => asset.id === command.collateralAssetId) : undefined
+    const assessment = assessLoan(player, command.amount, state.difficulty, collateral)
+    if (!assessment.approved) return reject(current, assessment.reason)
     player.cash += command.amount
-    player.loans.push({ id: uid(state, 'bank-loan'), name: 'Банковский кредит', balance: command.amount, monthlyPayment: Math.round(command.amount * 0.03) })
+    player.loans.push({ id: uid(state, 'bank-loan'), name: collateral ? `Кредит под залог: ${collateral.name}` : 'Банковский кредит', balance: command.amount, monthlyPayment: assessment.monthlyPayment, annualRate: assessment.annualRate, termMonths: assessment.termMonths, collateralAssetId: collateral?.id })
     return { state, accepted: true }
   }
   if (command.type === 'REPAY_LOAN') {
@@ -417,7 +449,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
       loan.balance -= payment
       player.cash -= payment
       amount -= payment
-      loan.monthlyPayment = Math.round(loan.balance * 0.03)
+      loan.monthlyPayment = loan.balance > 0 ? loanPayment(loan.balance, loan.annualRate, Math.max(1, loan.termMonths)) : 0
       if (amount === 0) break
     }
     player.loans = player.loans.filter((loan) => loan.balance > 0)
