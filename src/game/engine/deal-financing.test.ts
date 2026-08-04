@@ -66,6 +66,26 @@ describe('deal financing planner', () => {
     expect(result.state.phase).toBe('decision')
   })
 
+  it('keeps an underwater asset deficiency when it is sold inside a successful deal', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const underwater = testAsset('vending', player.id, 'underwater-vending')
+    underwater.marketValue = 100_000
+    underwater.loan = 180_000
+    underwater.monthlyPayment = loanPayment(underwater.loan, underwater.loanRate, underwater.loanTermMonths)
+    player.assets = [underwater]
+    player.cash = 150_000
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'business', businessId: 'coffee', askingPrice: 480_000, negotiated: false }
+
+    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'cash', saleAssetIds: [underwater.id] })
+
+    expect(result.accepted).toBe(true)
+    const deficiency = result.state.players[0].loans.find((loan) => loan.name.includes('Остаток после продажи'))
+    expect(deficiency?.balance).toBe(80_000)
+    expect(deficiency?.monthlyPayment).toBeGreaterThan(0)
+  })
+
   it('combines a sale with a secured loan and forbids selling the collateral', () => {
     const game = startedGame()
     const player = game.players[0]

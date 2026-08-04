@@ -416,6 +416,7 @@ const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   const totalSecuredDebt = asset.loan + collateralDebt
   const proceeds = Math.max(0, grossPrice - totalSecuredDebt)
   const deficiency = Math.max(0, totalSecuredDebt - grossPrice)
+  const bankPayment = Math.min(grossPrice, totalSecuredDebt)
   if (collateralLoan) player.loans = player.loans.filter((loan) => loan.id !== collateralLoan.id)
   if (deficiency > 0) {
     const rate = 0.36
@@ -424,7 +425,9 @@ const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   }
   player.cash += proceeds
   player.assets = player.assets.filter((item) => item.id !== asset.id)
-  return { proceeds, collateralPayment: Math.min(grossPrice, collateralDebt), deficiency }
+  const businessLoanPayment = Math.min(asset.loan, bankPayment)
+  const collateralPayment = Math.max(0, bankPayment - businessLoanPayment)
+  return { proceeds, collateralPayment, bankPayment, deficiency }
 }
 
 
@@ -658,8 +661,8 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
     const marketValue = assetMarketValue(asset)
-    const { proceeds, collateralPayment } = sellAsset(player, asset, marketValue)
-    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, банку ${(asset.loan + collateralPayment).toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽`, proceeds >= asset.downPayment ? 'good' : 'neutral')
+    const { proceeds, bankPayment, deficiency } = sellAsset(player, asset, marketValue)
+    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, банку ${bankPayment.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, proceeds >= asset.downPayment ? 'good' : deficiency > 0 ? 'bad' : 'neutral')
     return { state, accepted: true }
   }
 

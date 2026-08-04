@@ -331,15 +331,45 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const businessPayment = loanPayment(financedLoan, business.loanRate, business.loanTermMonths)
     const downPayment = Math.max(0, askingPrice - financedLoan)
     const selectedAssets = player.assets.filter((asset) => saleAssetIds.includes(asset.id))
-    const saleProceeds = selectedAssets.reduce((sum, asset) => sum + assetLiquidationProceeds(player, asset), 0)
-    const cashAfterSales = player.cash + saleProceeds
+    const saleImpactFor = (asset: Player['assets'][number]) => {
+      const collateralDebt = pledgedLoanForAsset(player, asset.id)?.balance ?? 0
+      const grossPrice = assetMarketValue(asset)
+      const securedDebt = asset.loan + collateralDebt
+      const proceeds = Math.max(0, grossPrice - securedDebt)
+      const deficiency = Math.max(0, securedDebt - grossPrice)
+      return { proceeds, deficiency, deficiencyPayment: loanPayment(deficiency, 0.36, 36) }
+    }
+    const financingPlayer = structuredClone(player)
+    let saleProceeds = 0
+    let saleDeficiency = 0
+    let deficiencyPayment = 0
+    let lostMonthlyFlow = 0
+    for (const asset of selectedAssets) {
+      const impact = saleImpactFor(asset)
+      saleProceeds += impact.proceeds
+      saleDeficiency += impact.deficiency
+      deficiencyPayment += impact.deficiencyPayment
+      lostMonthlyFlow += assetCashflow(asset)
+      financingPlayer.assets = financingPlayer.assets.filter((item) => item.id !== asset.id)
+      financingPlayer.loans = financingPlayer.loans.filter((loan) => loan.collateralAssetId !== asset.id)
+      financingPlayer.cash += impact.proceeds
+      if (impact.deficiency > 0) financingPlayer.loans.push({
+        id: `preview-deficiency-${asset.id}`,
+        name: `Остаток после продажи: ${asset.name}`,
+        balance: impact.deficiency,
+        monthlyPayment: impact.deficiencyPayment,
+        annualRate: 0.36,
+        termMonths: 36,
+        missedPayments: 0,
+      })
+    }
+    const cashAfterSales = financingPlayer.cash
     const remainingGap = Math.max(0, downPayment - cashAfterSales)
     const projectedOperatingIncome = business.revenue - business.operatingCosts
     const hasBuyerContribution = cashAfterSales >= downPayment * 0.3
-    const unsecured = assessLoan(player, remainingGap, game.difficulty, undefined, projectedOperatingIncome, businessPayment)
-    const collateralOffers = player.assets
-      .filter((asset) => !saleAssetIds.includes(asset.id))
-      .map((asset) => ({ asset, offer: assessLoan(player, remainingGap, game.difficulty, asset, projectedOperatingIncome, businessPayment) }))
+    const unsecured = assessLoan(financingPlayer, remainingGap, game.difficulty, undefined, projectedOperatingIncome, businessPayment)
+    const collateralOffers = financingPlayer.assets
+      .map((asset) => ({ asset, offer: assessLoan(financingPlayer, remainingGap, game.difficulty, asset, projectedOperatingIncome, businessPayment) }))
       .filter(({ offer }) => remainingGap > 0 && offer.approved)
 
     return <>
@@ -347,11 +377,11 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
       {player.assets.length > 0 && <div className="deal-financing-panel">
         <div className="portfolio-heading"><span><small>СОБРАТЬ ФИНАНСИРОВАНИЕ</small><b>Продать активы для первого взноса</b></span><strong className={saleProceeds > 0 ? 'good' : ''}>+{money(saleProceeds)}</strong></div>
         <div className="funding-actions">{player.assets.map((asset) => {
-          const proceeds = assetLiquidationProceeds(player, asset)
+          const impact = saleImpactFor(asset)
           const selected = saleAssetIds.includes(asset.id)
           return <button type="button" key={asset.id} aria-pressed={selected} className={selected ? 'selected-funding' : ''} onClick={() => toggleSaleAsset(asset.id)}>
             <b>{selected ? '✓ Продать' : 'Продать'} {asset.name}</b>
-            <small>На руки {money(proceeds)} · поток {money(assetCashflow(asset))}/мес</small>
+            <small>На руки {money(impact.proceeds)}{impact.deficiency > 0 ? ` · останется долг ${money(impact.deficiency)}` : ''} · поток {money(assetCashflow(asset))}/мес</small>
           </button>
         })}</div>
       </div>}
@@ -359,6 +389,7 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
         <span>После выбранных продаж <b>{money(cashAfterSales)}</b></span>
         <span>Осталось найти <b className={remainingGap > 0 ? 'bad' : 'good'}>{money(remainingGap)}</b></span>
       </div>
+      {saleDeficiency > 0 && <div className="bank-verdict declined"><div><small>ПОСЛЕДСТВИЯ ПРОДАЖИ</small><b>Останется долг {money(saleDeficiency)}</b></div><span>Новый платёж {money(deficiencyPayment)}/мес · потеря потока {money(lostMonthlyFlow)}/мес</span></div>}
       <button className="primary-action" disabled={remainingGap > 0} onClick={() => buy('cash')}>
         {saleAssetIds.length > 0 ? 'Продать выбранные и купить' : 'Купить за свои'} <span>→</span>
       </button>
