@@ -2,8 +2,8 @@ import { useState } from 'react'
 import './App.css'
 import './premium.css'
 import { board, businesses, developments, difficultySettings, professions } from './game/content/content'
-import type { Decision, Difficulty, Funding, GameCommand, MonthlyReport, SkillId } from './game/domain/types'
-import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, pledgedLoanForAsset, stockMarketValue, totalDebt } from './game/systems/economy'
+import type { Decision, Difficulty, Funding, GameCommand, GameState, MonthlyReport, Player, SkillId } from './game/domain/types'
+import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, competitionStandings, freedomProgress, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, pledgedLoanForAsset, stockMarketValue, totalDebt } from './game/systems/economy'
 import { hasSave } from './game/persistence/save'
 import { useGameStore } from './store/gameStore'
 import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
@@ -59,7 +59,7 @@ function GameScreen() {
   const dispatch = useGameStore((store) => store.dispatch)
   const resetGame = useGameStore((store) => store.resetGame)
   const error = useGameStore((store) => store.error)
-  const [tab, setTab] = useState<'board' | 'assets' | 'journal'>('board')
+  const [tab, setTab] = useState<'board' | 'race' | 'assets' | 'journal'>('board')
   const [dismissedReportMonth, setDismissedReportMonth] = useState<number | null>(null)
   const player = game.players[0]
   const freedom = Math.min(100, Math.round((passiveIncome(player, game.stockMarket) / Math.max(1, monthlyExpenses(player))) * 100))
@@ -86,16 +86,18 @@ function GameScreen() {
     </section>
 
     {tab === 'board' && <Board onRoll={() => dispatch({ type: 'ROLL_DICE' })} />}
+    {tab === 'race' && <Race />}
     {tab === 'assets' && <Assets />}
     {tab === 'journal' && <Journal />}
 
     {error && <div className="toast">{error}</div>}
     {game.pendingDecision && <DecisionSheet decision={game.pendingDecision} dispatch={dispatch} />}
     {report && dismissedReportMonth !== report.month && <MonthlyReportSheet report={report} onClose={() => setDismissedReportMonth(report.month)} />}
-    {game.phase === 'victory' && <Victory onReset={resetGame} />}
+    {game.phase === 'finished' && <GameResult game={game} onReset={resetGame} />}
 
     <nav className="bottom-nav">
       <button className={tab === 'board' ? 'active' : ''} onClick={() => setTab('board')}><span>◈</span>Поле</button>
+      <button className={tab === 'race' ? 'active' : ''} onClick={() => setTab('race')}><span>⌁</span>Гонка</button>
       <button className={tab === 'assets' ? 'active' : ''} onClick={() => setTab('assets')}><span>▤</span>Активы</button>
       <button className={tab === 'journal' ? 'active' : ''} onClick={() => setTab('journal')}><span>≡</span>Журнал</button>
     </nav>
@@ -120,9 +122,29 @@ function Board({ onRoll }: { onRoll: () => void }) {
     <button className="roll-button" disabled={game.phase !== 'ready'} onClick={onRoll}>
       <span className="cube">⌁</span><b>{game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>Ход нельзя отменить</small>
     </button>
-    <div className="rivals">
-      {game.players.slice(1).map((bot) => <div key={bot.id}><i /> <span>{bot.name}<small>{bot.botStrategy === 'careful' ? 'Осторожный' : bot.botStrategy === 'aggressive' ? 'Агрессивный' : 'Сбалансированный'} · {money(netWorth(bot, game.stockMarket))}</small></span></div>)}
-    </div>
+    <div className="rivals">{competitionStandings(game.players, game.stockMarket).slice(0, 3).map((rival, index) => <div className={rival.id === player.id ? 'you' : rival.status} key={rival.id}><b>{index + 1}</b><span>{rival.name}<small>{rival.status === 'bankrupt' ? 'Выбыл' : `${freedomProgress(rival, game.stockMarket)}% · ${money(netWorth(rival, game.stockMarket))}`}</small></span></div>)}</div>
+  </section>
+}
+
+const strategyName = (player: Player) => !player.isBot ? 'Твоя стратегия' : player.botStrategy === 'careful' ? 'Осторожный' : player.botStrategy === 'aggressive' ? 'Агрессивный' : 'Сбалансированный'
+
+function Race() {
+  const game = useGameStore((store) => store.game)
+  const standings = competitionStandings(game.players, game.stockMarket)
+  return <section className="content-section">
+    <div className="section-heading"><span className="eyebrow">КОНКУРЕНЦИЯ</span><h2>Гонка игроков</h2></div>
+    <p className="race-intro">Побеждает тот, кто первым покроет расходы пассивным доходом. Разовый высокий капитал сам по себе свободы не даёт.</p>
+    <div className="race-list">{standings.map((rival, index) => {
+      const progress = freedomProgress(rival, game.stockMarket)
+      const cashflow = monthlyCashflow(rival, game.stockMarket)
+      return <article className={`race-card ${rival.id === 'human' ? 'human' : ''} ${rival.status}`} key={rival.id}>
+        <div className="race-rank">{rival.status === 'bankrupt' ? '×' : index + 1}</div>
+        <div className="race-main"><div className="race-name"><span><b>{rival.name}</b><small>{strategyName(rival)} · уровень {playerLevel(rival)}</small></span><strong>{rival.status === 'free' ? 'Свобода' : rival.status === 'bankrupt' ? 'Банкрот' : `${progress}%`}</strong></div>
+          <div className="race-progress"><i style={{ width: `${Math.min(100, progress)}%` }} /></div>
+          <div className="race-facts"><span>Капитал <b>{money(netWorth(rival, game.stockMarket))}</b></span><span>Поток <b className={cashflow >= 0 ? 'good' : 'bad'}>{cashflow >= 0 ? '+' : ''}{money(cashflow)}</b></span><span>Долг <b>{money(totalDebt(rival))}</b></span><span>Активы <b>{rival.assets.length + rival.stocks.length}</b></span></div>
+        </div>
+      </article>
+    })}</div>
   </section>
 }
 
@@ -246,8 +268,15 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
   return <div className="sheet-backdrop"><section className="decision-sheet"><div className="sheet-handle" />{body}</section></div>
 }
 
-function Victory({ onReset }: { onReset: () => void }) {
-  return <div className="sheet-backdrop victory"><section className="decision-sheet"><div className="victory-mark">₽</div><span className="eyebrow">ФИНАНСОВАЯ СВОБОДА</span><h2>Ты вышел из круга</h2><p>Пассивный доход теперь покрывает твои расходы. Ты больше не обязан работать ради следующего платежа.</p><button className="primary-action" onClick={onReset}>Сыграть ещё раз</button></section></div>
+function GameResult({ game, onReset }: { game: GameState; onReset: () => void }) {
+  const standings = competitionStandings(game.players, game.stockMarket)
+  const winner = game.players.find((player) => player.id === game.outcome?.winnerId)
+  const humanWon = winner?.id === 'human'
+  const title = humanWon ? 'Ты выиграл гонку' : winner ? `${winner.name} победил` : 'Ты обанкротился'
+  const description = game.outcome?.reason === 'freedom'
+    ? `${winner?.name ?? 'Игрок'} первым покрыл расходы пассивным доходом.`
+    : game.outcome?.reason === 'last-solvent' ? `${winner?.name ?? 'Игрок'} остался последним платёжеспособным участником.` : 'Долги, отрицательный капитал и кассовый разрыв остановили твою игру.'
+  return <div className="sheet-backdrop victory"><section className="decision-sheet result-sheet"><div className="victory-mark">{humanWon ? '₽' : '×'}</div><span className="eyebrow">ИТОГИ · МЕСЯЦ {game.month}</span><h2>{title}</h2><p>{description}</p><div className="final-standings">{standings.map((player, index) => <div key={player.id}><b>{player.status === 'bankrupt' ? '×' : index + 1}</b><span>{player.name}<small>{player.status === 'bankrupt' ? 'Банкрот' : `${freedomProgress(player, game.stockMarket)}% пути к свободе`}</small></span><strong>{money(netWorth(player, game.stockMarket))}</strong></div>)}</div><button className="primary-action" onClick={onReset}>Сыграть ещё раз</button></section></div>
 }
 
 export default function App() {

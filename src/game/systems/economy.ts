@@ -1,5 +1,5 @@
 import { difficultySettings } from '../content/content'
-import type { Asset, Difficulty, MonthlyReport, Player, StockQuote } from '../domain/types'
+import type { Asset, Difficulty, MonthlyReport, Player, PlayerStatus, StockQuote } from '../domain/types'
 import { skillLevel } from './progression'
 
 export const assetCashflow = (asset: Asset) =>
@@ -114,6 +114,29 @@ export const netWorth = (player: Player, market: StockQuote[] = []) =>
 
 export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) =>
   passiveIncome(player, market) >= monthlyExpenses(player)
+
+export const freedomProgress = (player: Player, market: StockQuote[] = []) =>
+  Math.max(0, Math.round((passiveIncome(player, market) / Math.max(1, monthlyExpenses(player))) * 100))
+
+export const isBankrupt = (player: Player, market: StockQuote[] = []) =>
+  player.cash < -monthlyExpenses(player) * 2 && netWorth(player, market) < 0 && monthlyCashflow(player, market) < 0
+
+export const competitionStatus = (player: Player, market: StockQuote[] = []): PlayerStatus => {
+  if (player.status !== 'active') return player.status
+  if (isFinanciallyFree(player, market)) return 'free'
+  if (isBankrupt(player, market)) return 'bankrupt'
+  return 'active'
+}
+
+export const competitionStandings = (players: Player[], market: StockQuote[] = []) =>
+  [...players].sort((a, b) => {
+    const statusWeight = (player: Player) => competitionStatus(player, market) === 'free' ? 2 : competitionStatus(player, market) === 'active' ? 1 : 0
+    const statusDifference = statusWeight(b) - statusWeight(a)
+    if (statusDifference) return statusDifference
+    const freedomDifference = freedomProgress(b, market) - freedomProgress(a, market)
+    if (freedomDifference) return freedomDifference
+    return netWorth(b, market) - netWorth(a, market)
+  })
 
 export const createMonthlyReport = (player: Player, month: number, market: StockQuote[] = [], resaleReturns = 0): MonthlyReport => {
   const assetRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)

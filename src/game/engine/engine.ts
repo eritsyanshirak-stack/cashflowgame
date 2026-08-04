@@ -1,10 +1,10 @@
 import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, initialStockMarket, marketHeadlines, professions } from '../content/content'
 import type { Asset, BotStrategy, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
-import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isFinanciallyFree, loanPayment, pledgedLoanForAsset } from '../systems/economy'
+import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBankrupt, isFinanciallyFree, loanPayment, pledgedLoanForAsset } from '../systems/economy'
 import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, trainingCost } from '../systems/progression'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 6,
+  version: 7,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -19,6 +19,7 @@ export const emptyGame = (seed = Date.now()): GameState => ({
   difficulty: 'normal',
   stockMarket: structuredClone(initialStockMarket),
   marketHeadline: 'Рынок открылся без сильных движений',
+  outcome: null,
 })
 
 const random = (state: GameState) => {
@@ -56,6 +57,8 @@ const makePlayer = (professionId: string, name: string, isBot: boolean, index: n
     resaleDeals: [],
     experience: 0,
     skills: emptySkills(),
+    status: 'active',
+    eliminatedMonth: null,
     botStrategy: isBot ? botStrategies[(index - 1) % botStrategies.length] : undefined,
   }
 }
@@ -140,13 +143,16 @@ const settleResales = (state: GameState, player: Player, nextMonth: number) => {
 
 const settleMonth = (state: GameState) => {
   const nextMonth = state.month + 1
-  const resaleReturns = state.players.map((player) => settleResales(state, player, nextMonth))
+  const resaleReturns = state.players.map((player) => player.status === 'active' ? settleResales(state, player, nextMonth) : 0)
   const humanReport = createMonthlyReport(state.players[0], state.month, state.stockMarket, resaleReturns[0])
   state.players.forEach((player, index) => {
+    if (player.status !== 'active') return
     const report = createMonthlyReport(player, state.month, state.stockMarket, resaleReturns[index])
     player.cash += report.netCashflow
   })
-  state.players.forEach((player) => updateAssetMarket(state, player))
+  state.players.forEach((player) => {
+    if (player.status === 'active') updateAssetMarket(state, player)
+  })
   updateStockMarket(state)
   state.month = nextMonth
   state.day = 1
@@ -256,6 +262,7 @@ const runBots = (state: GameState) => {
   const settings = difficultySettings[state.difficulty]
   for (let index = 1; index < state.players.length; index += 1) {
     const bot = state.players[index]
+    if (bot.status !== 'active') continue
     const strategy = bot.botStrategy ?? 'balanced'
     const risk = strategy === 'careful' ? 0.72 : strategy === 'aggressive' ? 1.25 : 1
     const roll = 1 + Math.floor(random(state) * 6)
@@ -330,13 +337,44 @@ const runBots = (state: GameState) => {
   }
 }
 
+const finishGame = (state: GameState, winnerId: string | null, reason: NonNullable<GameState['outcome']>['reason']) => {
+  state.phase = 'finished'
+  state.pendingDecision = null
+  state.outcome = { winnerId, reason }
+  const winner = state.players.find((player) => player.id === winnerId)
+  if (reason === 'human-bankrupt') addEvent(state, 'Партия окончена', 'Твоя экономика не выдержала долговой нагрузки.', 'bad')
+  else if (winner) addEvent(state, 'Победитель определён', `${winner.name} первым завершил гонку.`, winner.isBot ? 'bad' : 'good')
+}
+
+const evaluateCompetition = (state: GameState) => {
+  for (const player of state.players) {
+    if (player.status !== 'active') continue
+    if (isFinanciallyFree(player, state.stockMarket)) {
+      player.status = 'free'
+      finishGame(state, player.id, 'freedom')
+      return
+    }
+    if (isBankrupt(player, state.stockMarket)) {
+      player.status = 'bankrupt'
+      player.eliminatedMonth = state.month
+      addEvent(state, 'Банкротство', `${player.name} выбыл из гонки.`, player.isBot ? 'neutral' : 'bad')
+      if (!player.isBot) {
+        finishGame(state, null, 'human-bankrupt')
+        return
+      }
+    }
+  }
+  const active = state.players.filter((player) => player.status === 'active')
+  if (active.length === 1 && state.players.length > 1) finishGame(state, active[0].id, 'last-solvent')
+}
+
 const completeHumanTurn = (state: GameState) => {
   state.pendingDecision = null
   runBots(state)
   advanceCalendar(state)
   state.currentPlayerIndex = 0
-  state.phase = isFinanciallyFree(state.players[0], state.stockMarket) ? 'victory' : 'ready'
-  if (state.phase === 'victory') addEvent(state, 'Финансовая свобода', 'Пассивный доход покрывает все расходы.', 'good')
+  state.phase = 'ready'
+  evaluateCompetition(state)
 }
 
 const reject = (state: GameState, error: string): CommandResult => ({ state, accepted: false, error })
@@ -360,7 +398,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     return { state: started, accepted: true }
   }
 
-  if (state.phase === 'setup' || state.phase === 'victory') return reject(current, 'Команда сейчас недоступна')
+  if (state.phase === 'setup' || state.phase === 'finished') return reject(current, 'Команда сейчас недоступна')
   const player = state.players[0]
 
   if (command.type === 'DEVELOP_ASSET') {

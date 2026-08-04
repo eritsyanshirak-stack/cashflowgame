@@ -2,9 +2,9 @@ import { z } from 'zod'
 import type { GameState } from '../domain/types'
 
 const saveSchema = z.object({
-  version: z.literal(6),
+  version: z.literal(7),
   seed: z.number().int().nonnegative(),
-  phase: z.enum(['setup', 'ready', 'decision', 'victory']),
+  phase: z.enum(['setup', 'ready', 'decision', 'finished']),
   day: z.number().int().min(1).max(30),
   month: z.number().int().min(1),
   round: z.number().int().nonnegative(),
@@ -17,6 +17,7 @@ const saveSchema = z.object({
     loans: z.array(z.unknown()), deposit: z.number(), bonds: z.number(), stocks: z.array(z.unknown()), resaleDeals: z.array(z.unknown()),
     experience: z.number().int().nonnegative(),
     skills: z.object({ negotiation: z.number().nonnegative(), marketing: z.number().nonnegative(), management: z.number().nonnegative(), finance: z.number().nonnegative(), brand: z.number().nonnegative() }),
+    status: z.enum(['active', 'free', 'bankrupt']), eliminatedMonth: z.number().int().positive().nullable(),
     botStrategy: z.enum(['careful', 'balanced', 'aggressive']).optional(),
   })).min(1),
   pendingDecision: z.unknown().nullable(),
@@ -30,9 +31,10 @@ const saveSchema = z.object({
   difficulty: z.enum(['easy', 'normal', 'hard']),
   stockMarket: z.array(z.unknown()),
   marketHeadline: z.string(),
+  outcome: z.object({ winnerId: z.string().nullable(), reason: z.enum(['freedom', 'human-bankrupt', 'last-solvent']) }).nullable(),
 })
 
-export const SAVE_KEY = 'vyhod-iz-kruga-save-v6'
+export const SAVE_KEY = 'vyhod-iz-kruga-save-v7'
 
 export const saveGame = (state: GameState) => localStorage.setItem(SAVE_KEY, JSON.stringify(state))
 

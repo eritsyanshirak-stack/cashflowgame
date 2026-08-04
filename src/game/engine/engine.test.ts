@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { businesses } from '../content/content'
 import { executeCommand, emptyGame } from './engine'
-import { assessLoan, assetCashflow, monthlyCashflow, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
+import { assessLoan, assetCashflow, competitionStandings, freedomProgress, monthlyCashflow, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
 import type { Asset } from '../domain/types'
 import { playerLevel, skillLevel } from '../systems/progression'
 
@@ -425,5 +425,70 @@ describe('game engine', () => {
     const result = executeCommand(game, { type: 'TRAIN', skillId: 'brand' })
     expect(result.accepted).toBe(true)
     expect(result.state.players[0].salary).toBe(salary + 12_000)
+  })
+
+  it('finishes the race when a bot reaches financial freedom first', () => {
+    const game = executeCommand(emptyGame(31), { type: 'START_GAME', professionId: 'trainer', botCount: 1, seed: 31 }).state
+    const bot = game.players[1]
+    bot.deposit = Math.ceil(bot.baseExpenses / 0.009) + 1_000_000
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'salary' }
+
+    const result = executeCommand(game, { type: 'SKIP_DECISION' })
+
+    expect(result.state.phase).toBe('finished')
+    expect(result.state.outcome).toEqual({ winnerId: bot.id, reason: 'freedom' })
+    expect(result.state.players[1].status).toBe('free')
+  })
+
+  it('eliminates a bankrupt bot and stops its future turns', () => {
+    let game = executeCommand(emptyGame(40), { type: 'START_GAME', professionId: 'trainer', botCount: 2, seed: 40 }).state
+    const bankruptBot = game.players[1]
+    bankruptBot.cash = -bankruptBot.baseExpenses * 3
+    bankruptBot.salary = 0
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'salary' }
+    game = executeCommand(game, { type: 'SKIP_DECISION' }).state
+    expect(game.players[1].status).toBe('bankrupt')
+    const positionAfterElimination = game.players[1].position
+    const cashAfterElimination = game.players[1].cash
+
+    for (let turn = 0; turn < 7; turn += 1) {
+      game.phase = 'decision'
+      game.pendingDecision = { kind: 'salary' }
+      game = executeCommand(game, { type: 'SKIP_DECISION' }).state
+    }
+    expect(game.players[1].position).toBe(positionAfterElimination)
+    expect(game.players[1].cash).toBe(cashAfterElimination)
+  })
+
+  it('ends in defeat when the human economy is insolvent', () => {
+    const game = startedGame(51)
+    const player = game.players[0]
+    player.cash = -player.baseExpenses * 3
+    player.salary = 0
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'salary' }
+
+    const result = executeCommand(game, { type: 'SKIP_DECISION' })
+
+    expect(result.state.phase).toBe('finished')
+    expect(result.state.outcome).toEqual({ winnerId: null, reason: 'human-bankrupt' })
+    expect(result.state.players[0].status).toBe('bankrupt')
+  })
+
+  it('ranks active players by freedom progress before capital', () => {
+    const game = executeCommand(emptyGame(61), { type: 'START_GAME', professionId: 'trainer', botCount: 2, seed: 61 }).state
+    const [human, firstBot, secondBot] = game.players
+    human.deposit = 1_000_000
+    firstBot.deposit = 2_000_000
+    secondBot.cash = 10_000_000
+    secondBot.status = 'bankrupt'
+
+    const standings = competitionStandings(game.players, game.stockMarket)
+
+    expect(standings[0].id).toBe(firstBot.id)
+    expect(standings.at(-1)?.id).toBe(secondBot.id)
+    expect(freedomProgress(firstBot, game.stockMarket)).toBeGreaterThan(freedomProgress(human, game.stockMarket))
   })
 })

@@ -1,11 +1,12 @@
 export type PlayerId = string
-export type Phase = 'setup' | 'ready' | 'decision' | 'victory'
+export type Phase = 'setup' | 'ready' | 'decision' | 'finished'
 export type CellType = 'salary' | 'business' | 'market' | 'expense' | 'chance' | 'bank' | 'growth'
 export type Difficulty = 'easy' | 'normal' | 'hard'
 export type BotStrategy = 'careful' | 'balanced' | 'aggressive'
 export type SkillId = 'negotiation' | 'marketing' | 'management' | 'finance' | 'brand'
 
 export type SkillProgress = Record<SkillId, number>
+export type PlayerStatus = 'active' | 'free' | 'bankrupt'
 
 export interface Profession {
   id: string
@@ -98,7 +99,14 @@ export interface Player {
   resaleDeals: ResaleDeal[]
   experience: number
   skills: SkillProgress
+  status: PlayerStatus
+  eliminatedMonth: number | null
   botStrategy?: BotStrategy
+}
+
+export interface GameOutcome {
+  winnerId: PlayerId | null
+  reason: 'freedom' | 'human-bankrupt' | 'last-solvent'
 }
 
 export type Decision =
@@ -137,7 +145,7 @@ export interface MonthlyReport {
 }
 
 export interface GameState {
-  version: 6
+  version: 7
   seed: number
   phase: Phase
   day: number
@@ -152,6 +160,7 @@ export interface GameState {
   difficulty: Difficulty
   stockMarket: StockQuote[]
   marketHeadline: string
+  outcome: GameOutcome | null
 }
 
 export type Funding = 'cash' | 'credit' | 'secured' | 'partner30' | 'partner50'
