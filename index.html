@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Выход из круга" />
+  <title>Выход из круга</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <section id="setupScreen" class="screen setup-screen">
+      <div class="hero-card">
+        <div class="eyebrow">ФИНАНСОВАЯ ИГРА</div>
+        <h1>Выход из круга</h1>
+        <p>Покупай бизнесы, инвестируй, торгуйся, управляй долгом и выведи пассивный доход выше расходов.</p>
+      </div>
+
+      <div class="setup-grid">
+        <label class="field">
+          <span>Профессия</span>
+          <select id="professionSelect"></select>
+        </label>
+        <label class="field">
+          <span>Соперники</span>
+          <select id="botCountSelect">
+            <option value="1">1 бот</option>
+            <option value="2" selected>2 бота</option>
+            <option value="3">3 бота</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Сложность</span>
+          <select id="difficultySelect">
+            <option value="easy">Лёгкая</option>
+            <option value="normal" selected>Нормальная</option>
+            <option value="hard">Сложная</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Подсказки</span>
+          <select id="hintsSelect">
+            <option value="on" selected>Включены</option>
+            <option value="off">Выключены</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="setup-actions">
+        <button id="newGameBtn" class="btn btn-primary btn-xl">Начать новую игру</button>
+        <button id="continueGameBtn" class="btn btn-secondary btn-xl hidden">Продолжить сохранённую</button>
+      </div>
+
+      <div class="disclaimer">Все котировки и события игровые и не являются финансовой рекомендацией.</div>
+    </section>
+
+    <section id="gameScreen" class="screen game-screen hidden">
+      <header class="topbar">
+        <div>
+          <div id="playerRank" class="rank-chip">🌱 Новичок</div>
+          <div id="turnLabel" class="turn-label">Твой ход</div>
+        </div>
+        <div class="calendar-card">
+          <strong id="calendarText">День 1 · месяц 1</strong>
+          <span id="salaryText">До расчёта 29 дней</span>
+        </div>
+      </header>
+
+      <div class="month-progress"><i id="monthProgress"></i></div>
+
+      <div id="playersStrip" class="players-strip"></div>
+
+      <section class="stats-grid">
+        <article class="stat-card"><span>Деньги</span><strong id="cashStat">0 ₽</strong></article>
+        <article class="stat-card"><span>Чистый капитал</span><strong id="worthStat">0 ₽</strong></article>
+        <article class="stat-card"><span>Пассивный доход</span><strong id="passiveStat">0 ₽/мес</strong></article>
+        <article class="stat-card"><span>Все расходы</span><strong id="expenseStat">0 ₽/мес</strong></article>
+      </section>
+
+      <section class="board-card">
+        <div id="board" class="board" aria-label="Игровое поле"></div>
+      </section>
+
+      <section class="turn-card">
+        <div class="turn-card-head">
+          <div>
+            <span class="eyebrow">ТЕКУЩАЯ КЛЕТКА</span>
+            <strong id="currentCellLabel">Расчёт</strong>
+          </div>
+          <div id="die" class="die">⚄</div>
+        </div>
+        <p id="statusText">Бросай кубик. После полного круга и по календарю будет финансовый расчёт.</p>
+        <button id="rollBtn" class="btn btn-roll">Бросить кубик</button>
+        <div class="quick-menu">
+          <button data-nav="assets"><b>🏢</b><span>Активы</span></button>
+          <button data-nav="market"><b>📈</b><span>Биржа</span></button>
+          <button data-nav="bank"><b>🏦</b><span>Банк</span></button>
+          <button data-nav="growth"><b>🚀</b><span>Развитие</span></button>
+          <button data-nav="journal"><b>📚</b><span>Журнал</span></button>
+        </div>
+      </section>
+
+      <section class="log-section">
+        <div class="section-title">Последние события</div>
+        <div id="eventLog" class="event-log"></div>
+      </section>
+    </section>
+  </div>
+
+  <div id="sheetBackdrop" class="sheet-backdrop hidden">
+    <section class="sheet" role="dialog" aria-modal="true">
+      <header class="sheet-header">
+        <div>
+          <span id="sheetType" class="eyebrow">РАЗДЕЛ</span>
+          <h2 id="sheetTitle">Заголовок</h2>
+        </div>
+        <button id="sheetCloseBtn" class="icon-btn">Закрыть</button>
+      </header>
+      <div id="sheetBody" class="sheet-body"></div>
+    </section>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
