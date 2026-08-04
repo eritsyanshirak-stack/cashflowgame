@@ -1,0 +1,28 @@
+name: Balance Patch CI
+
+on:
+  push:
+    branches:
+      - balance-v1.1
+  pull_request:
+    branches:
+      - rewrite/react-mvp
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
