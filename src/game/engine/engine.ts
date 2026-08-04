@@ -427,6 +427,23 @@ const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   return { proceeds, collateralPayment: Math.min(grossPrice, collateralDebt), deficiency }
 }
 
+
+const liquidateAssetsForDeal = (player: Player, saleAssetIds: string[] | undefined, collateralAssetId?: string) => {
+  const ids = [...new Set(saleAssetIds ?? [])]
+  if (collateralAssetId && ids.includes(collateralAssetId)) {
+    return { ok: false as const, error: 'Один актив нельзя одновременно продать и заложить' }
+  }
+  const assets = ids.map((id) => player.assets.find((asset) => asset.id === id))
+  if (assets.some((asset) => !asset)) return { ok: false as const, error: 'Один из выбранных активов уже недоступен' }
+
+  const sold: Array<{ name: string; proceeds: number }> = []
+  for (const asset of assets as Asset[]) {
+    const result = sellAsset(player, asset, assetMarketValue(asset))
+    sold.push({ name: asset.name, proceeds: result.proceeds })
+  }
+  return { ok: true as const, sold }
+}
+
 const awardProgress = (state: GameState, player: Player, experience: number, skillId?: Parameters<typeof grantProgress>[2], skillPoints = 0) => {
   const oldLevel = playerLevel(player)
   const oldSkillLevel = skillId ? skillLevel(player, skillId) : 0
@@ -724,9 +741,17 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (decision.kind !== 'business') return reject(current, 'Сейчас нет сделки')
     const business = businesses.find((item) => item.id === decision.businessId)
     if (!business || business.requiredLevel > playerLevel(player)) return reject(current, `Для этой сделки нужен уровень ${business?.requiredLevel ?? '?'}`)
+
+    const liquidation = liquidateAssetsForDeal(player, command.saleAssetIds, command.collateralAssetId)
+    if (!liquidation.ok) return reject(current, liquidation.error)
     const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none')
-    if (!asset) return reject(current, command.funding === 'cash' ? 'Не хватает своих денег' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил эту схему финансирования')
+    if (!asset) return reject(current, command.funding === 'cash' ? 'Даже после продажи выбранных активов денег не хватает' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил итоговую схему финансирования')
+
     player.assets.push(asset)
+    if (liquidation.sold.length > 0) {
+      const total = liquidation.sold.reduce((sum, item) => sum + item.proceeds, 0)
+      addEvent(state, 'Активы проданы для сделки', `${liquidation.sold.map((item) => item.name).join(', ')}. На первый взнос направлено ${total.toLocaleString('ru-RU')} ₽.`, 'neutral')
+    }
     awardProgress(state, player, 60, 'finance', 10)
     addEvent(state, 'Новый актив', `${asset.name}, доля ${Math.round(asset.ownership * 100)}%`, 'good')
     completeHumanTurn(state)
@@ -737,9 +762,17 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (decision.kind !== 'opportunity') return reject(current, 'Сейчас нет редкой сделки')
     const deal = rareDeals.find((item) => item.id === decision.opportunityId)
     if (!deal || deal.minLevel > playerLevel(player)) return reject(current, `Для этой возможности нужен уровень ${deal?.minLevel ?? '?'}`)
+
+    const liquidation = liquidateAssetsForDeal(player, command.saleAssetIds, command.collateralAssetId)
+    if (!liquidation.ok) return reject(current, liquidation.error)
     const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none')
-    if (!asset) return reject(current, 'Не удалось профинансировать эту возможность')
+    if (!asset) return reject(current, 'Не удалось профинансировать эту возможность выбранной схемой')
+
     player.assets.push(asset)
+    if (liquidation.sold.length > 0) {
+      const total = liquidation.sold.reduce((sum, item) => sum + item.proceeds, 0)
+      addEvent(state, 'Активы проданы для возможности', `${liquidation.sold.map((item) => item.name).join(', ')}. Получено ${total.toLocaleString('ru-RU')} ₽.`, 'neutral')
+    }
     awardProgress(state, player, 85, 'finance', 14)
     addEvent(state, 'Редкая возможность куплена', `${decision.title}: ${asset.name} за ${decision.askingPrice.toLocaleString('ru-RU')} ₽.`, 'good')
     completeHumanTurn(state)

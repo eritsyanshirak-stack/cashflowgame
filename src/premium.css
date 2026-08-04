@@ -412,3 +412,34 @@ h1 em { -webkit-text-stroke-color: var(--acid); }
   .stats-grid .metric strong { font-size: 13px; }
   .tile > span { font-size: 15px; }
 }
+
+
+.deal-financing-panel {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid rgba(22, 101, 76, .18);
+  border-radius: 18px;
+  background: rgba(247, 250, 247, .86);
+}
+.funding-actions button.selected-funding {
+  border-color: #17694f;
+  box-shadow: inset 0 0 0 1px #17694f;
+  background: rgba(23, 105, 79, .08);
+}
+.deal-funding-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+.deal-funding-summary span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: rgba(20, 30, 27, .055);
+  font-size: 12px;
+  color: #7b817f;
+}
+.deal-funding-summary b { font-size: 14px; color: #222827; }

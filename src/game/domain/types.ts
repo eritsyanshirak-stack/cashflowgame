@@ -189,8 +189,8 @@ export type GameCommand =
   | { type: 'ROLL_DICE' }
   | { type: 'NEGOTIATE_BUSINESS'; offerPercent: 0.85 | 0.9 | 0.95 }
   | { type: 'INSPECT_BUSINESS'; level: 'basic' | 'full' }
-  | { type: 'BUY_BUSINESS'; funding: Funding; collateralAssetId?: string }
-  | { type: 'BUY_OPPORTUNITY'; funding: Funding; collateralAssetId?: string }
+  | { type: 'BUY_BUSINESS'; funding: Funding; collateralAssetId?: string; saleAssetIds?: string[] }
+  | { type: 'BUY_OPPORTUNITY'; funding: Funding; collateralAssetId?: string; saleAssetIds?: string[] }
   | { type: 'SELL_ASSET'; assetId: string }
   | { type: 'ACCEPT_SALE_OFFER'; assetId: string }
   | { type: 'DEVELOP_ASSET'; assetId: string; developmentId: string }

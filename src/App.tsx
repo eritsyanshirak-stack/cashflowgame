@@ -316,7 +316,62 @@ function Journal() {
 function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (command: GameCommand) => boolean }) {
   const game = useGameStore((store) => store.game)
   const player = game.players[0]
+  const [saleAssetIds, setSaleAssetIds] = useState<string[]>([])
+  const toggleSaleAsset = (assetId: string) => setSaleAssetIds((current) =>
+    current.includes(assetId) ? current.filter((id) => id !== assetId) : [...current, assetId],
+  )
   const commonSkip = <button className="ghost-action" onClick={() => dispatch({ type: 'SKIP_DECISION' })}>Пропустить и завершить ход</button>
+
+  const renderFundingPlanner = (
+    business: (typeof businesses)[number],
+    askingPrice: number,
+    buy: (funding: Funding, collateralAssetId?: string) => boolean,
+  ) => {
+    const financedLoan = Math.min(askingPrice, Math.round(business.loan * (askingPrice / business.price)))
+    const businessPayment = loanPayment(financedLoan, business.loanRate, business.loanTermMonths)
+    const downPayment = Math.max(0, askingPrice - financedLoan)
+    const selectedAssets = player.assets.filter((asset) => saleAssetIds.includes(asset.id))
+    const saleProceeds = selectedAssets.reduce((sum, asset) => sum + assetLiquidationProceeds(player, asset), 0)
+    const cashAfterSales = player.cash + saleProceeds
+    const remainingGap = Math.max(0, downPayment - cashAfterSales)
+    const projectedOperatingIncome = business.revenue - business.operatingCosts
+    const hasBuyerContribution = cashAfterSales >= downPayment * 0.3
+    const unsecured = assessLoan(player, remainingGap, game.difficulty, undefined, projectedOperatingIncome, businessPayment)
+    const collateralOffers = player.assets
+      .filter((asset) => !saleAssetIds.includes(asset.id))
+      .map((asset) => ({ asset, offer: assessLoan(player, remainingGap, game.difficulty, asset, projectedOperatingIncome, businessPayment) }))
+      .filter(({ offer }) => remainingGap > 0 && offer.approved)
+
+    return <>
+      <div className="cash-check"><span>Свои деньги</span><strong>{money(player.cash)}</strong></div>
+      {player.assets.length > 0 && <div className="deal-financing-panel">
+        <div className="portfolio-heading"><span><small>СОБРАТЬ ФИНАНСИРОВАНИЕ</small><b>Продать активы для первого взноса</b></span><strong className={saleProceeds > 0 ? 'good' : ''}>+{money(saleProceeds)}</strong></div>
+        <div className="funding-actions">{player.assets.map((asset) => {
+          const proceeds = assetLiquidationProceeds(player, asset)
+          const selected = saleAssetIds.includes(asset.id)
+          return <button type="button" key={asset.id} aria-pressed={selected} className={selected ? 'selected-funding' : ''} onClick={() => toggleSaleAsset(asset.id)}>
+            <b>{selected ? '✓ Продать' : 'Продать'} {asset.name}</b>
+            <small>На руки {money(proceeds)} · поток {money(assetCashflow(asset))}/мес</small>
+          </button>
+        })}</div>
+      </div>}
+      <div className="deal-funding-summary">
+        <span>После выбранных продаж <b>{money(cashAfterSales)}</b></span>
+        <span>Осталось найти <b className={remainingGap > 0 ? 'bad' : 'good'}>{money(remainingGap)}</b></span>
+      </div>
+      <button className="primary-action" disabled={remainingGap > 0} onClick={() => buy('cash')}>
+        {saleAssetIds.length > 0 ? 'Продать выбранные и купить' : 'Купить за свои'} <span>→</span>
+      </button>
+      <div className="funding-actions">
+        {remainingGap > 0 && unsecured.approved && hasBuyerContribution && <button onClick={() => buy('credit')}><b>{saleAssetIds.length > 0 ? 'Продать активы + кредит' : 'Наличными + кредит'}</b><small>Банк добавит {money(remainingGap)} · {money(unsecured.monthlyPayment)}/мес</small></button>}
+        {collateralOffers.map(({ asset, offer }) => <button key={asset.id} onClick={() => buy('secured', asset.id)}><b>{saleAssetIds.length > 0 ? 'Продать выбранные + ' : ''}заложить {asset.name}</b><small>Получить {money(remainingGap)} · {Math.round(offer.annualRate * 100)}% · {money(offer.monthlyPayment)}/мес</small></button>)}
+        <button disabled={cashAfterSales < Math.round(downPayment * .7)} onClick={() => buy('partner30')}><b>{saleAssetIds.length > 0 ? 'Продажа + партнёр 30%' : 'Партнёр 30%'}</b><small>Твой взнос {money(Math.round(downPayment * .7))}</small></button>
+        <button disabled={cashAfterSales < Math.round(downPayment * .5)} onClick={() => buy('partner50')}><b>{saleAssetIds.length > 0 ? 'Продажа + партнёр 50%' : 'Партнёр 50%'}</b><small>Твой взнос {money(Math.round(downPayment * .5))}</small></button>
+      </div>
+      {remainingGap > 0 && !unsecured.approved && collateralOffers.length === 0 && <div className="bank-verdict declined"><b>Текущая схема не проходит</b><span>{unsecured.reason}. Выбери другой актив для продажи или залога.</span></div>}
+    </>
+  }
+
   let body: React.ReactNode
 
   if (decision.kind === 'business') {
@@ -324,44 +379,27 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const financedLoan = Math.min(decision.askingPrice, Math.round(business.loan * (decision.askingPrice / business.price)))
     const payment = loanPayment(financedLoan, business.loanRate, business.loanTermMonths)
     const flow = business.revenue - business.operatingCosts - payment
-    const downPayment = Math.max(0, decision.askingPrice - financedLoan)
-    const gap = Math.max(0, downPayment - player.cash)
-    const hasBuyerContribution = player.cash >= downPayment * 0.3
-    const projectedOperatingIncome = business.revenue - business.operatingCosts
-    const unsecured = assessLoan(player, gap, game.difficulty, undefined, projectedOperatingIncome, payment)
-    const collateralOffers = player.assets.map((asset) => ({ asset, offer: assessLoan(player, gap, game.difficulty, asset, projectedOperatingIncome, payment) })).filter(({ offer }) => offer.approved)
-    const buy = (funding: Funding, collateralAssetId?: string) => dispatch({ type: 'BUY_BUSINESS', funding, collateralAssetId })
+    const buy = (funding: Funding, collateralAssetId?: string) => dispatch({ type: 'BUY_BUSINESS', funding, collateralAssetId, saleAssetIds })
     body = <><div className="deal-title"><span>{business.icon}</span><div><small>{business.category} · уровень {business.requiredLevel}</small><h2>{business.name}</h2></div></div>
-      <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(downPayment)} /><Metric label="Риск" value={business.riskRating === 'low' ? 'Низкий' : business.riskRating === 'medium' ? 'Средний' : 'Высокий'} /><Metric label="Поток после запуска" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
+      <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(Math.max(0, decision.askingPrice - financedLoan))} /><Metric label="Риск" value={business.riskRating === 'low' ? 'Низкий' : business.riskRating === 'medium' ? 'Средний' : 'Высокий'} /><Metric label="Поток после запуска" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
       <div className="bank-verdict"><div><small>ПРОВЕРКА ДОКУМЕНТОВ</small><b>{decision.inspection && decision.inspection !== 'none' ? (decision.issueRevealed ? (decision.hiddenIssue && decision.hiddenIssue !== 'none' ? 'Найдена проблема' : 'Проверка чистая') : 'Результат неоднозначный') : 'Не проводилась'}</b></div><span>{decision.issueRevealed && decision.hiddenIssue && decision.hiddenIssue !== 'none' ? ({ documents: 'Проблемы с документами или лицензией', lease: 'Риск по аренде', repair: 'Скрытый ремонт', 'hidden-debt': 'Скрытый долг' } as const)[decision.hiddenIssue] : 'Без проверки риск скрытых проблем выше'}</span></div>
       {(!decision.inspection || decision.inspection === 'none') && <div className="split-actions two"><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'basic' })}>Базовая проверка</button><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'full' })}>Полная проверка</button></div>}
       {!decision.negotiated && <div className="negotiation"><div><b>Попробовать торг</b><small>Чем ниже цена, тем выше шанс потерять сделку</small></div><div><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })}>−5%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.9 })}>−10%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.85 })}>−15%</button></div></div>}
       {decision.negotiationNote && <div className="negotiation-note">{decision.negotiationNote}</div>}
-      <div className="cash-check"><span>У тебя сейчас</span><strong>{money(player.cash)}</strong></div>
-      {gap > 0 && <div className={`bank-verdict ${unsecured.approved && hasBuyerContribution ? 'approved' : 'declined'}`}><div><small>БАНКОВСКАЯ ОЦЕНКА · {unsecured.score}</small><b>{unsecured.approved && hasBuyerContribution ? `Одобрено ${money(gap)}` : 'Без залога отказ'}</b></div><span>{!hasBuyerContribution ? `Нужно внести своими минимум ${money(Math.ceil(downPayment * .3))}` : unsecured.approved ? `${Math.round(unsecured.annualRate * 100)}% · ${money(unsecured.monthlyPayment)}/мес` : unsecured.reason}</span></div>}
-      <button className="primary-action" disabled={gap > 0} onClick={() => buy('cash')}>Купить за свои <span>→</span></button>
-      <div className="funding-actions">
-        {gap > 0 && unsecured.approved && hasBuyerContribution && <button onClick={() => buy('credit')}><b>Наличными + кредит</b><small>Банк добавит {money(gap)}</small></button>}
-        {gap > 0 && collateralOffers.map(({ asset, offer }) => <button key={asset.id} onClick={() => buy('secured', asset.id)}><b>Заложить {asset.name}</b><small>{money(gap)} · {Math.round(offer.annualRate * 100)}% · {money(offer.monthlyPayment)}/мес</small></button>)}
-        <button disabled={player.cash < Math.round(downPayment * .7)} onClick={() => buy('partner30')}><b>Партнёр 30%</b><small>Твой взнос {money(Math.round(downPayment * .7))}</small></button>
-        <button disabled={player.cash < Math.round(downPayment * .5)} onClick={() => buy('partner50')}><b>Партнёр 50%</b><small>Твой взнос {money(Math.round(downPayment * .5))}</small></button>
-      </div>{commonSkip}</>
+      {renderFundingPlanner(business, decision.askingPrice, buy)}
+      {commonSkip}</>
   } else if (decision.kind === 'opportunity') {
     const business = businesses.find((item) => item.id === decision.businessId)!
     const financedLoan = Math.min(decision.askingPrice, Math.round(business.loan * (decision.askingPrice / business.price)))
     const payment = loanPayment(financedLoan, business.loanRate, business.loanTermMonths)
-    const downPayment = Math.max(0, decision.askingPrice - financedLoan)
     const flow = business.revenue - business.operatingCosts - payment
-    const gap = Math.max(0, downPayment - player.cash)
-    const projectedOperatingIncome = business.revenue - business.operatingCosts
-    const unsecured = assessLoan(player, gap, game.difficulty, undefined, projectedOperatingIncome, payment)
-    const buy = (funding: Funding, collateralAssetId?: string) => dispatch({ type: 'BUY_OPPORTUNITY', funding, collateralAssetId })
+    const buy = (funding: Funding, collateralAssetId?: string) => dispatch({ type: 'BUY_OPPORTUNITY', funding, collateralAssetId, saleAssetIds })
     body = <><div className="decision-symbol good-bg">★</div><span className="eyebrow">РЕДКАЯ ВОЗМОЖНОСТЬ</span><h2>{decision.title}</h2><p>{decision.description}</p>
-      <div className="deal-grid"><Metric label="Цена сделки" value={money(decision.askingPrice)} /><Metric label="Обычная цена" value={money(business.price)} /><Metric label="Первый взнос" value={money(downPayment)} /><Metric label="Поток после запуска" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
+      <div className="deal-grid"><Metric label="Цена сделки" value={money(decision.askingPrice)} /><Metric label="Обычная цена" value={money(business.price)} /><Metric label="Первый взнос" value={money(Math.max(0, decision.askingPrice - financedLoan))} /><Metric label="Поток после запуска" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
       <div className="bank-verdict"><div><small>ПРОВЕРКА ДОКУМЕНТОВ</small><b>{decision.inspection && decision.inspection !== 'none' ? (decision.issueRevealed ? (decision.hiddenIssue && decision.hiddenIssue !== 'none' ? 'Обнаружен риск' : 'Существенных проблем нет') : 'Не всё удалось подтвердить') : 'Не проводилась'}</b></div><span>{decision.issueRevealed && decision.hiddenIssue && decision.hiddenIssue !== 'none' ? ({ documents: 'Проблемы с правами или лицензией', lease: 'Проблемный договор аренды', repair: 'Нужен скрытый ремонт', 'hidden-debt': 'Есть неучтённый долг' } as const)[decision.hiddenIssue] : 'Низкая цена может иметь причину'}</span></div>
       {(!decision.inspection || decision.inspection === 'none') && <div className="split-actions two"><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'basic' })}>Базовая проверка</button><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'full' })}>Полная проверка</button></div>}
-      <button className="primary-action" disabled={gap > 0} onClick={() => buy('cash')}>Купить за свои <span>→</span></button>
-      {gap > 0 && unsecured.approved && <div className="funding-actions"><button onClick={() => buy('credit')}><b>Наличными + кредит</b><small>Банк добавит {money(gap)}</small></button></div>}{commonSkip}</>
+      {renderFundingPlanner(business, decision.askingPrice, buy)}
+      {commonSkip}</>
   } else if (decision.kind === 'expense') body = <><div className="decision-symbol bad-bg">!</div><span className="eyebrow">НЕПРЕДВИДЕННЫЙ РАСХОД</span><h2>{decision.title}</h2><div className="big-number bad">-{money(decision.amount)}</div><button className="primary-action" onClick={() => dispatch({ type: 'PAY_EXPENSE' })}>Оплатить</button><button className="ghost-action" onClick={() => dispatch({ type: 'PAY_EXPENSE', withCredit: true })}>Оплатить в кредит</button></>
   else if (decision.kind === 'chance') body = <><div className="decision-symbol good-bg">↗</div><span className="eyebrow">ПЕРЕПРОДАЖА</span><h2>{decision.title}</h2><div className="deal-grid"><Metric label="Вложение сейчас" value={money(decision.investment)} /><Metric label="Возможный итог" value={`${money(decision.minReturn)} - ${money(decision.maxReturn)}`} /></div><div className="cash-check"><span>Срок сделки</span><strong>{decision.durationMonths} мес.</strong></div><p>Точная сумма неизвестна. Товар может принести прибыль, убыток или задержаться у тебя ещё на месяц.</p><button className="primary-action" disabled={player.cash < decision.investment} onClick={() => dispatch({ type: 'TAKE_CHANCE' })}>Купить товар <span>→</span></button>{commonSkip}</>
   else if (decision.kind === 'bank') {
