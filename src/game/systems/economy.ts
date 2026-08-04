@@ -11,7 +11,7 @@ export const assetRevenueMultiplier = (asset: Asset) => {
 }
 
 export const effectiveAssetRevenue = (asset: Asset) =>
-  Math.round(asset.revenue * assetRevenueMultiplier(asset))
+  Math.round(asset.revenue * assetRevenueMultiplier(asset) * (asset.externalRevenueMultiplier ?? 1))
 
 export const assetCashflow = (asset: Asset) =>
   effectiveAssetRevenue(asset) - asset.operatingCosts - asset.monthlyPayment
@@ -27,6 +27,12 @@ export const assetLiquidationProceeds = (player: Player, asset: Asset, grossPric
 
 export const stockMarketValue = (player: Player, market: StockQuote[]) =>
   player.stocks.reduce((sum, holding) => sum + holding.quantity * (market.find((quote) => quote.id === holding.stockId)?.price ?? 0), 0)
+
+export const freeStockMarketValue = (player: Player, market: StockQuote[]) =>
+  player.stocks.reduce((sum, holding) => {
+    const freeQuantity = Math.max(0, holding.quantity - (holding.pledgedQuantity ?? 0))
+    return sum + freeQuantity * (market.find((quote) => quote.id === holding.stockId)?.price ?? 0)
+  }, 0)
 
 export const monthlyStockDividends = (player: Player, market: StockQuote[]) =>
   player.stocks.reduce((sum, holding) => {
@@ -104,14 +110,15 @@ export const assessLoan = (
   collateral?: Asset,
   projectedMonthlyIncome = 0,
   projectedMonthlyPayment = 0,
+  rateDelta = 0,
 ): BankAssessment => {
   const settings = difficultySettings[difficulty]
   const financeLevel = skillLevel(player, 'finance')
   const securedLimit = collateral ? availableCollateral(player, collateral) : Number.POSITIVE_INFINITY
-  const existingUnsecuredLoans = player.loans.filter((loan) => !loan.collateralAssetId)
+  const existingUnsecuredLoans = player.loans.filter((loan) => !loan.collateralAssetId && !loan.collateralStockId)
   const financeDiscount = financeLevel * 0.015
   const repeatLoanSurcharge = collateral ? 0 : existingUnsecuredLoans.length * 0.02
-  const annualRate = Math.max(0.08, (collateral ? settings.securedRate : settings.unsecuredRate) - financeDiscount + repeatLoanSurcharge)
+  const annualRate = Math.max(0.08, (collateral ? settings.securedRate : settings.unsecuredRate) + rateDelta - financeDiscount + repeatLoanSurcharge)
   const termMonths = collateral ? 48 : 36
   const monthlyPayment = loanPayment(amount, annualRate, termMonths)
 
@@ -146,7 +153,7 @@ export const assessLoan = (
   const acquisitionLoan = projectedMonthlyIncome > 0 || projectedMonthlyPayment > 0
   const contributionLimit = player.cash * (acquisitionGapToCash[difficulty] + financeLevel * 0.1)
   const contributionReady = !acquisitionLoan || amount <= contributionLimit
-  const liquidity = player.cash + player.deposit + player.bonds
+  const liquidity = player.cash + player.deposit + player.bonds + freeStockMarketValue(player, [])
   const liquidityReady = liquidity >= monthlyExpenses(player) * reserveMonthsForLoan[difficulty]
 
   const leveragePenalty = Math.min(250, Math.round((totalDebt(player) / Math.max(1, income * 12)) * 155))
@@ -177,7 +184,7 @@ export const netWorth = (player: Player, market: StockQuote[] = []) =>
   player.baseDebt - player.loans.reduce((sum, loan) => sum + loan.balance, 0)
 
 export const liquidReserve = (player: Player, market: StockQuote[] = []) =>
-  player.cash + player.deposit + player.bonds + stockMarketValue(player, market)
+  player.cash + player.deposit + player.bonds + freeStockMarketValue(player, market)
 
 export const freedomChecklist = (player: Player, market: StockQuote[] = []) => {
   const expenses = monthlyExpenses(player)
@@ -187,7 +194,7 @@ export const freedomChecklist = (player: Player, market: StockQuote[] = []) => {
     Math.round(player.deposit * 0.009) + Math.round(player.bonds * 0.014),
   )
   const debtServiceLoad = monthlyDebtPayments(player) / reliableIncome
-  const unsecuredDebt = player.loans.filter((loan) => !loan.collateralAssetId).reduce((sum, loan) => sum + loan.balance, 0)
+  const unsecuredDebt = player.loans.filter((loan) => !loan.collateralAssetId && !loan.collateralStockId).reduce((sum, loan) => sum + loan.balance, 0)
   return {
     incomeCovered: passiveIncome(player, market) >= expenses,
     reserveReady: liquidReserve(player, market) >= expenses * 3,
@@ -232,7 +239,7 @@ export const competitionStandings = (players: Player[], market: StockQuote[] = [
     return netWorth(b, market) - netWorth(a, market)
   })
 
-export const createMonthlyReport = (player: Player, month: number, market: StockQuote[] = [], resaleReturns = 0): MonthlyReport => {
+export const createMonthlyReport = (player: Player, month: number, market: StockQuote[] = [], resaleReturns = 0, contractReturns = 0): MonthlyReport => {
   const assetRevenue = player.assets.reduce((sum, asset) => sum + effectiveAssetRevenue(asset), 0)
   const managementCost = portfolioManagementCost(player)
   const operatingCosts = player.assets.reduce((sum, asset) => sum + asset.operatingCosts, 0) + managementCost
@@ -242,7 +249,7 @@ export const createMonthlyReport = (player: Player, month: number, market: Stock
   const stockDividends = monthlyStockDividends(player, market)
   const loanPayments = player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
   const baseDebtPayment = Math.round(player.baseDebt * 0.02)
-  const netCashflow = player.salary + assetRevenue + depositIncome + bondIncome + stockDividends + resaleReturns -
+  const netCashflow = player.salary + assetRevenue + depositIncome + bondIncome + stockDividends + resaleReturns + contractReturns -
     player.baseExpenses - baseDebtPayment - operatingCosts - assetDebtPayments - loanPayments
 
   return {
@@ -251,7 +258,7 @@ export const createMonthlyReport = (player: Player, month: number, market: Stock
     salary: player.salary,
     assetRevenue,
     depositIncome,
-    bondIncome, stockDividends, resaleReturns,
+    bondIncome, stockDividends, resaleReturns, contractReturns,
     livingExpenses: player.baseExpenses + baseDebtPayment,
     operatingCosts,
     assetDebtPayments,
