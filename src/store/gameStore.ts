@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import type { GameCommand, GameState } from '../game/domain/types'
-import { emptyGame, executeCommand } from '../game/engine/engine'
+import type { GameState } from '../game/domain/types'
+import { emptyGame, executeCommand, type PatchedGameCommand } from '../game/engine/patchedEngine'
 import { clearSave, loadGame, saveGame } from '../game/persistence/save'
 
 interface GameStore {
   game: GameState
   error: string | null
-  dispatch: (command: GameCommand) => boolean
+  dispatch: (command: PatchedGameCommand) => boolean
   continueGame: () => boolean
   resetGame: () => void
 }
