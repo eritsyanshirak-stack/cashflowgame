@@ -106,6 +106,51 @@ test = test.replace(
     "    const financedLoan = Math.round(330_000 * (456_000 / 480_000))\n    expect(purchase.state.players[0].cash).toBe(150_000 - (456_000 - financedLoan))",
     1,
 )
+test = test.replace(
+    "expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 20_000, collateralAssetId: undefined })",
+    "expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 20_000 })",
+    1,
+)
+test = test.replace(
+    "expect(result.state.players[0].assets[0].revenue).toBe(92_160)",
+    "expect(result.state.players[0].assets[0].revenue).toBe(Math.round(businesses.find((item) => item.id === 'coffee')!.revenue * 1.28))",
+    1,
+)
+test = test.replace(
+    "    bot.deposit = Math.ceil(monthlyExpenses(bot) / 0.009) + 1_000_000",
+    "    bot.deposit = Math.ceil(monthlyExpenses(bot) / 0.009) + 1_000_000\n    bot.freedomStreak = 3",
+    1,
+)
+test = replace_once(
+    test,
+    """  it('requires a three-month liquid reserve before declaring financial freedom', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    player.assets = Array.from({ length: 4 }, (_, index) => ({ ...testAsset('coffee', player.id), id: `coffee-${index}` }))
+    player.cash = 0
+    expect(passiveIncome(player, game.stockMarket)).toBeGreaterThanOrEqual(monthlyExpenses(player))
+    expect(isFinanciallyFree(player, game.stockMarket)).toBe(false)
+    player.cash = monthlyExpenses(player) * 3
+    expect(isFinanciallyFree(player, game.stockMarket)).toBe(true)
+  })
+""",
+    """  it('requires liquid reserve and three stable months before declaring financial freedom', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const asset = testAsset('coffee', player.id)
+    asset.marketValue = 2_000_000
+    asset.revenue = monthlyExpenses(player) + asset.operatingCosts + asset.monthlyPayment + 10_000
+    player.assets = [asset]
+    player.freedomStreak = 3
+    player.cash = 0
+    expect(passiveIncome(player, game.stockMarket)).toBeGreaterThanOrEqual(monthlyExpenses(player))
+    expect(isFinanciallyFree(player, game.stockMarket)).toBe(false)
+    player.cash = monthlyExpenses(player) * 3
+    expect(isFinanciallyFree(player, game.stockMarket)).toBe(true)
+  })
+""",
+    'stable freedom test',
+)
 write(engine_test_path, test)
 
 balance_test_path = 'src/game/engine/balance.test.ts'
