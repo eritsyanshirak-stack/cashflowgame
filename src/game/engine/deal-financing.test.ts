@@ -31,12 +31,12 @@ const testAsset = (businessId: string, ownerId: string, id: string): Asset => {
 }
 
 describe('deal financing planner', () => {
-  it('sells a selected asset and uses only its net proceeds for the purchase', () => {
+  it('sells a selected asset at the quick-sale discount and uses only its net proceeds', () => {
     const game = startedGame()
     const player = game.players[0]
     const vending = testAsset('vending', player.id, 'sell-vending')
     player.assets = [vending]
-    player.cash = 60_000
+    player.cash = 66_300
     game.phase = 'decision'
     game.pendingDecision = { kind: 'business', businessId: 'coffee', askingPrice: 480_000, negotiated: false }
 
@@ -66,7 +66,7 @@ describe('deal financing planner', () => {
     expect(result.state.phase).toBe('decision')
   })
 
-  it('keeps an underwater asset deficiency when it is sold inside a successful deal', () => {
+  it('keeps an underwater asset deficiency after the 93 percent quick sale', () => {
     const game = startedGame()
     const player = game.players[0]
     const underwater = testAsset('vending', player.id, 'underwater-vending')
@@ -82,7 +82,7 @@ describe('deal financing planner', () => {
 
     expect(result.accepted).toBe(true)
     const deficiency = result.state.players[0].loans.find((loan) => loan.name.includes('Остаток после продажи'))
-    expect(deficiency?.balance).toBe(80_000)
+    expect(deficiency?.balance).toBe(87_000)
     expect(deficiency?.monthlyPayment).toBeGreaterThan(0)
   })
 
