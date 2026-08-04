@@ -1,6 +1,6 @@
 import { businesses } from '../content/content'
 import type { BuyerOfferAction, GameCommand, GameState, Player } from '../domain/types'
-import { assetCashflow, assetLiquidationProceeds, assetMarketValue, loanPayment, pledgedLoanForAsset } from '../systems/economy'
+import { assetCashflow, assetLiquidationProceeds, assetMarketValue, loanPayment, monthlyDebtPayments, pledgedLoanForAsset } from '../systems/economy'
 import { skillLevel } from '../systems/progression'
 import { createStockMarginCall, negotiateBuyerOffer, pledgeStockLoanTerms, pushSystemEvent, stockFreeQuantity } from '../systems/v14'
 
@@ -100,6 +100,7 @@ export const handleReadyV14Command = (state: GameState, command: GameCommand, ra
   if (command.type === 'SELL_ASSET_SHARE') {
     const asset = player.assets.find((item) => item.id === command.assetId)
     if (!asset) return rejected('Актив не найден')
+    if (pledgedLoanForAsset(player, asset.id)) return rejected('Нельзя продать долю бизнеса, пока он находится в залоге')
     const ownershipToSell = command.percent / 100
     if (asset.ownership - ownershipToSell < 0.1) return rejected('После продажи должно остаться хотя бы 10% бизнеса')
     const soldRatio = ownershipToSell / asset.ownership
@@ -133,6 +134,9 @@ export const handleReadyV14Command = (state: GameState, command: GameCommand, ra
     const amount = Math.floor(quantity * quote.price * 0.45)
     if (amount < 5_000) return rejected('Пакет слишком мал для залога')
     const terms = pledgeStockLoanTerms(amount)
+    const reliableIncome = Math.max(1, player.salary + player.assets.reduce((sum, asset) => sum + Math.max(0, assetCashflow(asset)), 0))
+    const projectedDebtLoad = (monthlyDebtPayments(player) + terms.monthlyPayment) / reliableIncome
+    if (projectedDebtLoad > 0.45) return rejected('Платежи по долгам после залога превысят 45% надёжного дохода')
     holding.pledgedQuantity = (holding.pledgedQuantity ?? 0) + quantity
     player.cash += amount
     player.loans.push({
@@ -279,7 +283,7 @@ export const quickSellAssetForFunding = (state: GameState, player: Player, asset
   return sellAssetAtPrice(state, player, assetId, Math.round(assetMarketValue(asset) * 0.93), 'Срочная продажа для финансирования')
 }
 
-export const sellAssetShareForFunding = (state: GameState, player: Player, assetId: string, percent: 10 | 25 | 50) =>
+export const sellAssetShareForFunding = (state: GameState, _player: Player, assetId: string, percent: 10 | 25 | 50) =>
   handleReadyV14Command(state, { type: 'SELL_ASSET_SHARE', assetId, percent }, () => 0).accepted
 
 export const businessForDecision = (businessId: string) => businesses.find((item) => item.id === businessId)

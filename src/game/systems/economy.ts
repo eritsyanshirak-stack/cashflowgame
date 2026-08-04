@@ -153,7 +153,7 @@ export const assessLoan = (
   const acquisitionLoan = projectedMonthlyIncome > 0 || projectedMonthlyPayment > 0
   const contributionLimit = player.cash * (acquisitionGapToCash[difficulty] + financeLevel * 0.1)
   const contributionReady = !acquisitionLoan || amount <= contributionLimit
-  const liquidity = player.cash + player.deposit + player.bonds + freeStockMarketValue(player, [])
+  const liquidity = player.cash + player.deposit + player.bonds
   const liquidityReady = liquidity >= monthlyExpenses(player) * reserveMonthsForLoan[difficulty]
 
   const leveragePenalty = Math.min(250, Math.round((totalDebt(player) / Math.max(1, income * 12)) * 155))

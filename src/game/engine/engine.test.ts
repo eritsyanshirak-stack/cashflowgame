@@ -169,7 +169,7 @@ describe('game engine', () => {
 
     expect(result.accepted).toBe(true)
     expect(result.state.players[0].assets).toHaveLength(0)
-    expect(result.state.players[0].cash).toBe(300_000)
+    expect(result.state.players[0].cash).toBe(266_400)
   })
 
   it('does not allow selling an asset while another decision is open', () => {
@@ -296,7 +296,7 @@ describe('game engine', () => {
     const sale = executeCommand(firstLoan.state, { type: 'SELL_ASSET', assetId: player.assets[0].id })
     expect(sale.accepted).toBe(true)
     expect(sale.state.players[0].loans).toHaveLength(0)
-    expect(sale.state.players[0].cash).toBe(240_000)
+    expect(sale.state.players[0].cash).toBe(233_700)
   })
 
   it('keeps an unpaid collateral shortfall as debt after a distressed sale', () => {
@@ -313,7 +313,7 @@ describe('game engine', () => {
 
     const sale = executeCommand(loan, { type: 'SELL_ASSET', assetId: asset.id })
 
-    expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 20_000 })
+    expect(sale.state.players[0].loans[0]).toMatchObject({ balance: 21_400 })
     expect(sale.state.players[0].cash).toBe(190_000)
   })
 

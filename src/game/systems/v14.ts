@@ -105,7 +105,7 @@ export const processAssetListings = (state: GameState, random: () => number) => 
 
   for (const asset of player.assets) {
     if (!asset.listingPrice || !asset.listingExpiresMonth) continue
-    if (state.month >= asset.listingExpiresMonth) {
+    if (state.month > asset.listingExpiresMonth) {
       asset.listingPrice = null
       asset.listingStartedMonth = null
       asset.listingExpiresMonth = null
