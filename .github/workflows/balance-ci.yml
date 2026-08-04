@@ -32,23 +32,11 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Generate balance v1.2 source
-        id: balance_patch
+      - name: Apply pending financing audit fixes
+        id: audit_fixes
         run: |
-          if grep -q "export type BusinessIssue" src/game/domain/types.ts; then
-            echo "applied=false" >> "$GITHUB_OUTPUT"
-            echo "Balance v1.2 is already materialized in source."
-          else
-            python3 scripts/apply_balance_v12_packed.py
-            python3 scripts/apply_balance_v12_fixes.py
-            echo "applied=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Add atomic deal financing
-        id: deal_financing
-        run: |
-          if [ -f scripts/apply_deal_financing.py ]; then
-            python3 scripts/apply_deal_financing.py
+          if [ -f scripts/apply_financing_audit_fixes.py ]; then
+            python3 scripts/apply_financing_audit_fixes.py
             echo "applied=true" >> "$GITHUB_OUTPUT"
           else
             echo "applied=false" >> "$GITHUB_OUTPUT"
@@ -64,13 +52,13 @@ jobs:
         run: npm run build
 
       - name: Commit verified source changes
-        if: steps.balance_patch.outputs.applied == 'true' || steps.deal_financing.outputs.applied == 'true'
+        if: steps.audit_fixes.outputs.applied == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f scripts/apply_balance_v12_packed.py scripts/apply_balance_v12_fixes.py scripts/apply_deal_financing.py
+          rm -f scripts/apply_financing_audit_fixes.py
           git add -A
-          git commit -m "feat: add atomic asset sales and collateral inside deals"
+          git commit -m "fix: align deal financing preview with final bank decision"
           git push origin HEAD:balance-v1.1
 
       - name: Upload preview bundle
@@ -81,17 +69,19 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: Publish static preview branch
+      - name: Publish clean static preview branch
         run: |
+          rm -rf /tmp/balance-preview
           mkdir -p /tmp/balance-preview
           cp -R dist/. /tmp/balance-preview/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan balance-preview-static
-          git rm -rf .
+          git rm -rf . || true
+          git clean -fdx
           cp -R /tmp/balance-preview/. .
           sed -i 's|src="/assets/|src="assets/|g; s|href="/assets/|href="assets/|g' index.html
           touch .nojekyll
           git add -A
-          git commit -m "preview: balance v1.2 ${GITHUB_SHA}"
+          git commit -m "preview: audited balance ${GITHUB_SHA}"
           git push --force origin HEAD:balance-preview-static
