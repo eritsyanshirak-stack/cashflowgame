@@ -1,5 +1,6 @@
 import { difficultySettings } from '../content/content'
 import type { Asset, Difficulty, MonthlyReport, Player, StockQuote } from '../domain/types'
+import { skillLevel } from './progression'
 
 export const assetCashflow = (asset: Asset) =>
   asset.revenue - asset.operatingCosts - asset.monthlyPayment
@@ -79,7 +80,8 @@ export const assessLoan = (
 ): BankAssessment => {
   const settings = difficultySettings[difficulty]
   const securedLimit = collateral ? availableCollateral(player, collateral) : Number.POSITIVE_INFINITY
-  const annualRate = collateral ? settings.securedRate : settings.unsecuredRate
+  const financeDiscount = skillLevel(player, 'finance') * 0.015
+  const annualRate = Math.max(0.08, (collateral ? settings.securedRate : settings.unsecuredRate) - financeDiscount)
   const termMonths = collateral ? 48 : 36
   const monthlyPayment = loanPayment(amount, annualRate, termMonths)
   const investmentIncome = Math.round(player.deposit * 0.009) + Math.round(player.bonds * 0.014)
@@ -87,14 +89,15 @@ export const assessLoan = (
   const income = Math.max(1, player.salary + investmentIncome + businessOperatingIncome + projectedMonthlyIncome)
   const obligations = player.baseExpenses + monthlyDebtPayments(player) + projectedMonthlyPayment + monthlyPayment
   const debtLoad = obligations / income
-  const freeForDebt = Math.max(0, income * settings.maxDebtLoad - player.baseExpenses - monthlyDebtPayments(player) - projectedMonthlyPayment)
+  const skilledDebtLimit = settings.maxDebtLoad + skillLevel(player, 'finance') * 0.025
+  const freeForDebt = Math.max(0, income * skilledDebtLimit - player.baseExpenses - monthlyDebtPayments(player) - projectedMonthlyPayment)
   const paymentPerRuble = loanPayment(100_000, annualRate, termMonths) / 100_000
   const incomeLimit = Math.max(0, Math.floor(freeForDebt / Math.max(paymentPerRuble, 0.001) / 10_000) * 10_000)
   const limit = Math.max(0, Math.min(incomeLimit, securedLimit))
   const leveragePenalty = Math.min(230, Math.round((totalDebt(player) / Math.max(1, income * 12)) * 145))
   const cashflowBonus = Math.min(90, Math.round(Math.max(0, monthlyCashflow(player)) / income * 130))
   const score = Math.max(300, Math.min(850, 735 + cashflowBonus - leveragePenalty - (difficulty === 'hard' ? 35 : 0)))
-  const approved = amount > 0 && amount <= limit && debtLoad <= settings.maxDebtLoad
+  const approved = amount > 0 && amount <= limit && debtLoad <= skilledDebtLimit
   const reason = approved
     ? collateral ? 'Одобрено под залог актива' : 'Одобрено без залога'
     : collateral && securedLimit < amount ? 'Стоимость залога не покрывает сумму'

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { businesses } from '../content/content'
 import { executeCommand, emptyGame } from './engine'
-import { assetCashflow, monthlyCashflow, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
+import { assessLoan, assetCashflow, monthlyCashflow, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
 import type { Asset } from '../domain/types'
+import { playerLevel, skillLevel } from '../systems/progression'
 
 const startedGame = (seed = 7) => executeCommand(emptyGame(seed), { type: 'START_GAME', professionId: 'trainer', seed }).state
 const testAsset = (businessId: string, ownerId: string): Asset => {
@@ -301,6 +302,7 @@ describe('game engine', () => {
     expect(sold.accepted).toBe(true)
     expect(sold.state.players[0].stocks[0].quantity).toBe(1)
     expect(sold.state.players[0].cash).toBe(bought.state.players[0].cash + Math.floor(quote.price * 0.985))
+    expect(sold.state.players[0].experience).toBe(0)
     expect(executeCommand(sold.state, { type: 'SELL_STOCK', stockId: quote.id, quantity: 2 }).accepted).toBe(false)
   })
 
@@ -343,5 +345,85 @@ describe('game engine', () => {
     expect(game.players[0].resaleDeals).toHaveLength(0)
     expect(game.lastMonthlyReport?.resaleReturns).toBe(140_000)
     expect(game.players[0].cash).toBe(cashBeforeMonth + monthlyCashflow(player, game.stockMarket) + 140_000)
+  })
+
+  it('trains a chosen skill and converts experience into player levels', () => {
+    const game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'growth' }
+
+    const first = executeCommand(game, { type: 'TRAIN', skillId: 'negotiation' })
+    expect(first.accepted).toBe(true)
+    expect(skillLevel(first.state.players[0], 'negotiation')).toBe(1)
+    expect(first.state.players[0].cash).toBe(100_000)
+    expect(first.state.players[0].experience).toBe(65)
+
+    first.state.phase = 'decision'
+    first.state.pendingDecision = { kind: 'growth' }
+    first.state.players[0].cash = 500_000
+    const second = executeCommand(first.state, { type: 'TRAIN', skillId: 'finance' })
+    expect(playerLevel(second.state.players[0])).toBe(2)
+  })
+
+  it('locks large businesses until the required player level', () => {
+    const game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'business', businessId: 'factory', askingPrice: 3_600_000, negotiated: false }
+    game.players[0].cash = 2_000_000
+
+    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'cash' })
+    expect(result.accepted).toBe(false)
+    expect(result.error).toContain('уровень 4')
+  })
+
+  it('uses negotiation skill to improve the real deal probability', () => {
+    const base = startedGame(578)
+    base.difficulty = 'hard'
+    base.phase = 'decision'
+    base.pendingDecision = { kind: 'business', businessId: 'coffee', askingPrice: 480_000, negotiated: false }
+    const skilled = structuredClone(base)
+    skilled.players[0].skills.negotiation = 200
+
+    const plainResult = executeCommand(base, { type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })
+    const skilledResult = executeCommand(skilled, { type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })
+    expect(plainResult.state.pendingDecision?.kind === 'business' ? plainResult.state.pendingDecision.askingPrice : null).not.toBe(456_000)
+    expect(skilledResult.state.pendingDecision).toMatchObject({ kind: 'business', askingPrice: 456_000 })
+  })
+
+  it('management skill discounts development while marketing increases its result', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    player.cash = 500_000
+    player.skills.management = 200
+    player.skills.marketing = 200
+    player.assets.push(testAsset('coffee', player.id))
+
+    const result = executeCommand(game, { type: 'DEVELOP_ASSET', assetId: player.assets[0].id, developmentId: 'marketing' })
+    expect(result.accepted).toBe(true)
+    expect(result.state.players[0].cash).toBe(500_000 - 31_488)
+    expect(result.state.players[0].assets[0].revenue).toBe(92_160)
+  })
+
+  it('finance skill improves real bank terms without removing underwriting', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const ordinary = assessLoan(player, 50_000, 'normal')
+    player.skills.finance = 200
+    const skilled = assessLoan(player, 50_000, 'normal')
+
+    expect(skilled.annualRate).toBeLessThan(ordinary.annualRate)
+    expect(skilled.limit).toBeGreaterThan(ordinary.limit)
+    expect(assessLoan(player, 50_000_000, 'normal').approved).toBe(false)
+  })
+
+  it('personal brand level increases active monthly income', () => {
+    const game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'growth' }
+    const salary = game.players[0].salary
+
+    const result = executeCommand(game, { type: 'TRAIN', skillId: 'brand' })
+    expect(result.accepted).toBe(true)
+    expect(result.state.players[0].salary).toBe(salary + 12_000)
   })
 })

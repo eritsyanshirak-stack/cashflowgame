@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { GameState } from '../domain/types'
 
 const saveSchema = z.object({
-  version: z.literal(5),
+  version: z.literal(6),
   seed: z.number().int().nonnegative(),
   phase: z.enum(['setup', 'ready', 'decision', 'victory']),
   day: z.number().int().min(1).max(30),
@@ -14,7 +14,10 @@ const saveSchema = z.object({
     id: z.string(), name: z.string(), isBot: z.boolean(), professionId: z.string(),
     position: z.number().int().nonnegative(), cash: z.number(), salary: z.number(),
     baseExpenses: z.number(), baseDebt: z.number(), assets: z.array(z.unknown()),
-    loans: z.array(z.unknown()), deposit: z.number(), bonds: z.number(), stocks: z.array(z.unknown()), resaleDeals: z.array(z.unknown()), botStrategy: z.enum(['careful', 'balanced', 'aggressive']).optional(),
+    loans: z.array(z.unknown()), deposit: z.number(), bonds: z.number(), stocks: z.array(z.unknown()), resaleDeals: z.array(z.unknown()),
+    experience: z.number().int().nonnegative(),
+    skills: z.object({ negotiation: z.number().nonnegative(), marketing: z.number().nonnegative(), management: z.number().nonnegative(), finance: z.number().nonnegative(), brand: z.number().nonnegative() }),
+    botStrategy: z.enum(['careful', 'balanced', 'aggressive']).optional(),
   })).min(1),
   pendingDecision: z.unknown().nullable(),
   events: z.array(z.unknown()),
@@ -29,7 +32,7 @@ const saveSchema = z.object({
   marketHeadline: z.string(),
 })
 
-export const SAVE_KEY = 'vyhod-iz-kruga-save-v5'
+export const SAVE_KEY = 'vyhod-iz-kruga-save-v6'
 
 export const saveGame = (state: GameState) => localStorage.setItem(SAVE_KEY, JSON.stringify(state))
 

@@ -73,6 +73,8 @@ h1 em { -webkit-text-stroke-color: var(--acid); }
 }
 .freedom-row { color: #676c73; font-weight: 700; }
 .freedom-row strong { color: var(--acid); }
+.level-row { display: flex; justify-content: space-between; margin-bottom: 8px; color: #31363b; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.level-row strong { color: #176b4d; }
 .progress { height: 5px; margin: 7px 0 10px; background: #e8ecea; border-radius: 99px; overflow: hidden; }
 .progress i { background: #176b4d; box-shadow: none; border-radius: inherit; }
 .stats-grid {
@@ -356,6 +358,21 @@ h1 em { -webkit-text-stroke-color: var(--acid); }
 .stock-row button { min-height: 32px; color: #176b4d; background: #fff; border: 1px solid #d9e2de; border-radius: 8px; font-size: 8px; font-weight: 800; }
 .stock-row button:disabled { color: #a3a7ac; background: #eceeef; border-color: #e2e4e6; }
 .market-fee { display: block; margin-bottom: 10px; color: #8b9096; font-size: 7px; text-align: center; }
+.skill-panel { padding: 12px; margin: 12px 0; background: #fff; border: 1px solid #e5e7ea; border-radius: 14px; }
+.skill-panel .portfolio-heading > strong { color: #176b4d; }
+.skill-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.skill-grid > div { display: grid; grid-template-columns: 24px 1fr; padding: 8px; background: #f5f6f7; border-radius: 10px; }
+.skill-grid > div > span { grid-row: 1 / 3; align-self: center; font-size: 17px; }
+.skill-grid b { color: #30343a; font-size: 8px; }
+.skill-grid small { margin-top: 2px; color: #858a90; font-size: 7px; }
+.training-list { display: grid; gap: 7px; margin: 14px 0 8px; }
+.training-list button { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 54px; padding: 9px 10px; text-align: left; color: #30343a; background: #f5f6f7; border: 1px solid #e2e5e7; border-radius: 12px; }
+.training-list button > span { font-size: 20px; }
+.training-list b, .training-list small { display: block; }
+.training-list b { font-size: 10px; }
+.training-list small { margin-top: 3px; color: #7d8288; font-size: 8px; }
+.training-list strong { color: #176b4d; font-size: 9px; white-space: nowrap; }
+.training-list button:disabled { opacity: .42; }
 
 @media (max-width: 370px) {
   .hero-stats { margin-inline: 9px; }

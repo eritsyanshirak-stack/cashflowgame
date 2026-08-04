@@ -2,10 +2,11 @@ import { useState } from 'react'
 import './App.css'
 import './premium.css'
 import { board, businesses, developments, difficultySettings, professions } from './game/content/content'
-import type { Decision, Difficulty, Funding, GameCommand, MonthlyReport } from './game/domain/types'
+import type { Decision, Difficulty, Funding, GameCommand, MonthlyReport, SkillId } from './game/domain/types'
 import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, pledgedLoanForAsset, stockMarketValue, totalDebt } from './game/systems/economy'
 import { hasSave } from './game/persistence/save'
 import { useGameStore } from './store/gameStore'
+import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
 
@@ -63,6 +64,8 @@ function GameScreen() {
   const player = game.players[0]
   const freedom = Math.min(100, Math.round((passiveIncome(player, game.stockMarket) / Math.max(1, monthlyExpenses(player))) * 100))
   const report = game.lastMonthlyReport
+  const level = playerLevel(player)
+  const nextLevelXp = nextPlayerLevelXp(player)
 
   return <main className="game-shell">
     <header className="topbar">
@@ -71,6 +74,7 @@ function GameScreen() {
     </header>
 
     <section className="hero-stats">
+      <div className="level-row"><span>Уровень {level} · {rankName(level)}</span><strong>{nextLevelXp ? `${player.experience}/${nextLevelXp} XP` : 'MAX'}</strong></div>
       <div className="freedom-row"><span>Путь к свободе</span><strong>{freedom}%</strong></div>
       <div className="progress"><i style={{ width: `${freedom}%` }} /></div>
       <div className="stats-grid">
@@ -130,13 +134,19 @@ function Assets() {
     <div className="section-heading"><span className="eyebrow">ПОРТФЕЛЬ</span><h2>Твои активы</h2></div>
     <div className="summary-line"><span>Денежный поток</span><strong className={monthlyCashflow(player, game.stockMarket) >= 0 ? 'good' : 'bad'}>{money(monthlyCashflow(player, game.stockMarket))}/мес</strong></div>
     <div className="summary-line"><span>Общий долг</span><strong>{money(totalDebt(player))}</strong></div>
+    <div className="skill-panel"><div className="portfolio-heading"><span><small>НАВЫКИ</small><b>Уровень {playerLevel(player)} · {rankName(playerLevel(player))}</b></span><strong>{player.experience} XP</strong></div><div className="skill-grid">{(Object.keys(skillDefinitions) as SkillId[]).map((skillId) => {
+      const definition = skillDefinitions[skillId]
+      const level = skillLevel(player, skillId)
+      const next = nextSkillXp(player, skillId)
+      return <div key={skillId}><span>{definition.icon}</span><b>{definition.name}</b><small>{level}/3{next ? ` · ${player.skills[skillId]}/${next}` : ' · MAX'}</small></div>
+    })}</div></div>
     {player.assets.length === 0 ? <div className="empty-state"><span>◇</span><h3>Активов пока нет</h3><p>Ищи сделки с положительным потоком. Цена сама по себе ничего не говорит.</p></div> : player.assets.map((asset) => <article className="asset-card asset-card-detailed" key={asset.id}>
       <div className="asset-main"><div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}%</small><h3>{asset.name}</h3><strong className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес</strong></div></div>
       {pledgedLoanForAsset(player, asset.id) && <div className="pledge-badge">В залоге у банка · остаток {money(pledgedLoanForAsset(player, asset.id)!.balance)}</div>}
       <div className="asset-facts"><span>Рыночная стоимость <b>{money(assetMarketValue(asset))}</b></span><span>Долг самого бизнеса <b>{money(asset.loan)}</b></span><span>Уровень развития <b>{asset.developmentLevel}/4</b></span><span>Получишь после банков <b>{money(assetLiquidationProceeds(player, asset))}</b></span></div>
       {asset.saleOffer && asset.offerExpiresMonth === game.month && <div className="sale-offer"><div><small>ПРЕДЛОЖЕНИЕ ДО КОНЦА МЕСЯЦА</small><strong>{money(asset.saleOffer)}</strong></div><button disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'ACCEPT_SALE_OFFER', assetId: asset.id })}>Принять</button></div>}
       <div className="development-list">{developments.filter((item) => !asset.developments.includes(item.id)).map((item) => {
-        const cost = Math.round(asset.price * asset.ownership * item.costRate)
+        const cost = developmentCost(player, asset, item.costRate)
         return <button key={item.id} disabled={game.phase !== 'ready' || asset.lastDevelopedMonth === game.month || player.cash < cost} onClick={() => dispatch({ type: 'DEVELOP_ASSET', assetId: asset.id, developmentId: item.id })}><span><b>{item.name}</b><small>{item.description}</small></span><strong>{money(cost)}</strong></button>
       })}</div>
       <div className="partner-actions"><span>{asset.ownership < 1 ? `Партнёр владеет ${Math.round((1 - asset.ownership) * 100)}%` : 'Ты единственный владелец'}</span><button disabled={game.phase !== 'ready' || asset.ownership >= 1} onClick={() => dispatch({ type: 'BUY_PARTNER_SHARE', assetId: asset.id })}>Выкупить 10%</button><button disabled={game.phase !== 'ready' || asset.ownership <= 0.5} onClick={() => dispatch({ type: 'SELL_PARTNER_SHARE', assetId: asset.id })}>Продать 10%</button></div>
@@ -199,7 +209,7 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const unsecured = assessLoan(player, gap, game.difficulty, undefined, projectedOperatingIncome, payment)
     const collateralOffers = player.assets.map((asset) => ({ asset, offer: assessLoan(player, gap, game.difficulty, asset, projectedOperatingIncome, payment) })).filter(({ offer }) => offer.approved)
     const buy = (funding: Funding, collateralAssetId?: string) => dispatch({ type: 'BUY_BUSINESS', funding, collateralAssetId })
-    body = <><div className="deal-title"><span>{business.icon}</span><div><small>{business.category}</small><h2>{business.name}</h2></div></div>
+    body = <><div className="deal-title"><span>{business.icon}</span><div><small>{business.category} · уровень {business.requiredLevel}</small><h2>{business.name}</h2></div></div>
       <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(downPayment)} /><Metric label="Долг бизнеса" value={money(business.loan)} /><Metric label="Чистый поток" value={`${money(flow)}/мес`} good={flow >= 0} bad={flow < 0} /></div>
       {!decision.negotiated && <div className="negotiation"><div><b>Попробовать торг</b><small>Чем ниже цена, тем выше шанс потерять сделку</small></div><div><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })}>−5%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.9 })}>−10%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.85 })}>−15%</button></div></div>}
       {decision.negotiationNote && <div className="negotiation-note">{decision.negotiationNote}</div>}
@@ -225,7 +235,12 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const change = quote.previousPrice ? (quote.price / quote.previousPrice - 1) * 100 : 0
     return <div className="stock-row" key={quote.id}><div><b>{quote.ticker}</b><small>{quote.name} · див. {(quote.dividendYield * 100).toFixed(1)}%</small></div><span><strong>{money(quote.price)}</strong><small className={change >= 0 ? 'good' : 'bad'}>{change >= 0 ? '+' : ''}{change.toFixed(1)}%</small></span><div><button disabled={player.cash < quote.price * 1.015} onClick={() => dispatch({ type: 'BUY_STOCK', stockId: quote.id, quantity: 1 })}>Купить</button><button disabled={!holding?.quantity} onClick={() => dispatch({ type: 'SELL_STOCK', stockId: quote.id, quantity: 1 })}>Продать{holding ? ` · ${holding.quantity}` : ''}</button></div></div>
   })}</div><small className="market-fee">В цене сделки комиссия 1,5%. Можно совершить несколько операций.</small><div className="split-actions two"><button onClick={() => dispatch({ type: 'DEPOSIT', amount: 50_000 })}>Депозит 50 000</button><button onClick={() => dispatch({ type: 'BUY_BONDS', amount: 50_000 })}>Облигации 50 000</button><button onClick={() => dispatch({ type: 'WITHDRAW_DEPOSIT', amount: 50_000 })}>Снять депозит</button><button onClick={() => dispatch({ type: 'SELL_BONDS', amount: 50_000 })}>Продать облигации</button></div>{commonSkip}</>
-  else if (decision.kind === 'growth') body = <><div className="decision-symbol good-bg">↑</div><span className="eyebrow">РАЗВИТИЕ</span><h2>Вложиться в себя</h2><p>Обучение стоит 60 000 ₽ и увеличивает активный доход на 21 000 ₽ в месяц.</p><button className="primary-action" onClick={() => dispatch({ type: 'TRAIN', cost: 60_000 })}>Пройти обучение</button>{commonSkip}</>
+  else if (decision.kind === 'growth') body = <><div className="decision-symbol good-bg">↑</div><span className="eyebrow">РАЗВИТИЕ</span><h2>Выбери навык</h2><p>Навыки меняют реальные условия сделок. Обучение также даёт опыт и открывает следующий уровень бизнеса.</p><div className="training-list">{(Object.keys(skillDefinitions) as SkillId[]).map((skillId) => {
+    const definition = skillDefinitions[skillId]
+    const level = skillLevel(player, skillId)
+    const cost = trainingCost(player, skillId)
+    return <button key={skillId} disabled={level >= 3 || player.cash < cost} onClick={() => dispatch({ type: 'TRAIN', skillId })}><span>{definition.icon}</span><div><b>{definition.name} · {level}/3</b><small>{definition.description}</small></div><strong>{level >= 3 ? 'MAX' : money(cost)}</strong></button>
+  })}</div>{commonSkip}</>
   else body = <><span className="eyebrow">РАСЧЁТ</span><h2>Финансовая пауза</h2><p>Текущий денежный поток: <strong>{money(monthlyCashflow(player, game.stockMarket))}/мес</strong></p>{commonSkip}</>
 
   return <div className="sheet-backdrop"><section className="decision-sheet"><div className="sheet-handle" />{body}</section></div>

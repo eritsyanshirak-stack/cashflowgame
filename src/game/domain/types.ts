@@ -3,6 +3,9 @@ export type Phase = 'setup' | 'ready' | 'decision' | 'victory'
 export type CellType = 'salary' | 'business' | 'market' | 'expense' | 'chance' | 'bank' | 'growth'
 export type Difficulty = 'easy' | 'normal' | 'hard'
 export type BotStrategy = 'careful' | 'balanced' | 'aggressive'
+export type SkillId = 'negotiation' | 'marketing' | 'management' | 'finance' | 'brand'
+
+export type SkillProgress = Record<SkillId, number>
 
 export interface Profession {
   id: string
@@ -23,6 +26,7 @@ export interface BusinessTemplate {
   loan: number
   revenue: number
   operatingCosts: number
+  requiredLevel: number
 }
 
 export interface Asset extends BusinessTemplate {
@@ -92,6 +96,8 @@ export interface Player {
   bonds: number
   stocks: StockHolding[]
   resaleDeals: ResaleDeal[]
+  experience: number
+  skills: SkillProgress
   botStrategy?: BotStrategy
 }
 
@@ -131,7 +137,7 @@ export interface MonthlyReport {
 }
 
 export interface GameState {
-  version: 5
+  version: 6
   seed: number
   phase: Phase
   day: number
@@ -171,7 +177,7 @@ export type GameCommand =
   | { type: 'SELL_STOCK'; stockId: string; quantity: number }
   | { type: 'TAKE_LOAN'; amount: number; collateralAssetId?: string }
   | { type: 'REPAY_LOAN'; amount: number }
-  | { type: 'TRAIN'; cost: number }
+  | { type: 'TRAIN'; skillId: SkillId }
 
 export interface CommandResult {
   state: GameState

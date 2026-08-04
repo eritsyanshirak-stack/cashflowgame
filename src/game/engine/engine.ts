@@ -1,9 +1,10 @@
 import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, initialStockMarket, marketHeadlines, professions } from '../content/content'
 import type { Asset, BotStrategy, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
 import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isFinanciallyFree, loanPayment, pledgedLoanForAsset } from '../systems/economy'
+import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, trainingCost } from '../systems/progression'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 5,
+  version: 6,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -53,13 +54,17 @@ const makePlayer = (professionId: string, name: string, isBot: boolean, index: n
     bonds: 0,
     stocks: [],
     resaleDeals: [],
+    experience: 0,
+    skills: emptySkills(),
     botStrategy: isBot ? botStrategies[(index - 1) % botStrategies.length] : undefined,
   }
 }
 
 const decisionForCell = (state: GameState, type: (typeof board)[number]['type']): Decision => {
   if (type === 'business') {
-    const business = pick(state, businesses)
+    const player = state.players[0]
+    const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(player))
+    const business = pick(state, unlocked)
     return { kind: 'business', businessId: business.id, askingPrice: business.price, negotiated: false }
   }
   if (type === 'expense') {
@@ -207,10 +212,11 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
   }
 }
 
-const applyDevelopment = (asset: Asset, developmentId: string, cost: number) => {
+const applyDevelopment = (asset: Asset, developmentId: string, cost: number, marketingLevel = 0) => {
   const development = developments.find((item) => item.id === developmentId)
   if (!development) return false
-  asset.revenue = Math.round(asset.revenue * (1 + development.revenueRate))
+  const marketingBonus = development.id === 'marketing' ? marketingLevel * 0.04 : 0
+  asset.revenue = Math.round(asset.revenue * (1 + development.revenueRate + marketingBonus))
   asset.operatingCosts = Math.max(0, Math.round(asset.operatingCosts * (1 + development.costGrowthRate)))
   asset.marketValue = Math.round(assetMarketValue(asset) * (1 + development.valueRate))
   asset.developments.push(development.id)
@@ -234,6 +240,16 @@ const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   player.cash += proceeds
   player.assets = player.assets.filter((item) => item.id !== asset.id)
   return { proceeds, collateralPayment }
+}
+
+const awardProgress = (state: GameState, player: Player, experience: number, skillId?: Parameters<typeof grantProgress>[2], skillPoints = 0) => {
+  const oldLevel = playerLevel(player)
+  const oldSkillLevel = skillId ? skillLevel(player, skillId) : 0
+  grantProgress(player, experience, skillId, skillPoints)
+  const newLevel = playerLevel(player)
+  const newSkillLevel = skillId ? skillLevel(player, skillId) : 0
+  if (skillId === 'brand' && newSkillLevel > oldSkillLevel) player.salary += 12_000 * (newSkillLevel - oldSkillLevel)
+  if (!player.isBot && newLevel > oldLevel) addEvent(state, 'Новый уровень', `Теперь доступен уровень ${newLevel}. Открылись более крупные сделки.`, 'good')
 }
 
 const runBots = (state: GameState) => {
@@ -261,17 +277,19 @@ const runBots = (state: GameState) => {
       const available = developments.filter((item) => !asset.developments.includes(item.id))
       const development = available[0]
       if (development) {
-        const cost = Math.round(asset.price * asset.ownership * development.costRate)
+        const cost = developmentCost(bot, asset, development.costRate)
         if (bot.cash > cost + bot.baseExpenses * (strategy === 'careful' ? 1 : 0.35)) {
-          applyDevelopment(asset, development.id, cost)
+          applyDevelopment(asset, development.id, cost, skillLevel(bot, 'marketing'))
           bot.cash -= cost
+          awardProgress(state, bot, 35, development.id === 'marketing' ? 'marketing' : 'management', 10)
           addEvent(state, 'Соперник развивает бизнес', `${bot.name}: ${asset.name} - ${development.name}`)
         }
       }
     }
 
     if (cell.type === 'business' && random(state) < settings.botActivity * risk) {
-      const business = pick(state, businesses)
+      const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(bot))
+      const business = pick(state, unlocked)
       const payment = Math.round(business.loan * 0.015)
       const profitable = business.revenue - business.operatingCosts - payment > 0
       const reserve = bot.baseExpenses * (strategy === 'careful' ? 1 : strategy === 'aggressive' ? 0.15 : 0.5)
@@ -281,6 +299,7 @@ const runBots = (state: GameState) => {
         const asset = makeAsset(state, bot, business.id, funding, Math.round(business.price * discount))
         if (asset) {
           bot.assets.push(asset)
+          awardProgress(state, bot, 55, 'finance', 8)
           addEvent(state, 'Ход соперника', `${bot.name} купил ${business.name}${discount < 1 ? ' после торга' : ''}`)
         }
       }
@@ -305,6 +324,7 @@ const runBots = (state: GameState) => {
       if (bot.cash > investment + bot.baseExpenses * 0.4) {
         bot.cash -= investment
         bot.resaleDeals.push({ id: uid(state, 'bot-resale'), title, investment, expectedMin: minReturn, expectedMax: maxReturn, resolvesMonth: state.month + durationMonths, outcomeAmount: Math.round(minReturn + random(state) * (maxReturn - minReturn)), delays: 0 })
+        awardProgress(state, bot, 18, 'brand', 5)
       }
     }
   }
@@ -350,11 +370,12 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (!asset || !development) return reject(current, 'Развитие не найдено')
     if (asset.developments.includes(development.id)) return reject(current, 'Это улучшение уже сделано')
     if (asset.lastDevelopedMonth === state.month) return reject(current, 'Этот бизнес уже развивали в текущем месяце')
-    const cost = Math.round(asset.price * asset.ownership * development.costRate)
+    const cost = developmentCost(player, asset, development.costRate)
     if (player.cash < cost) return reject(current, 'Не хватает денег на развитие')
     player.cash -= cost
-    applyDevelopment(asset, development.id, cost)
+    applyDevelopment(asset, development.id, cost, skillLevel(player, 'marketing'))
     asset.lastDevelopedMonth = state.month
+    awardProgress(state, player, 45, development.id === 'marketing' ? 'marketing' : 'management', 14)
     addEvent(state, 'Развитие бизнеса', `${asset.name}: ${development.name}, вложено ${cost.toLocaleString('ru-RU')} ₽`, 'good')
     return { state, accepted: true }
   }
@@ -422,12 +443,13 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (decision.negotiated) return reject(current, 'Ты уже сделал предложение')
     const settings = difficultySettings[state.difficulty]
     const boldnessPenalty = command.offerPercent === 0.85 ? 0.28 : command.offerPercent === 0.9 ? 0.13 : 0
-    const success = random(state) < settings.negotiationChance - boldnessPenalty
+    const success = random(state) < settings.negotiationChance + skillLevel(player, 'negotiation') * 0.07 - boldnessPenalty
     decision.negotiated = true
     if (success) {
       decision.askingPrice = Math.round(decision.askingPrice * command.offerPercent)
       decision.negotiationNote = `Продавец согласился на скидку ${Math.round((1 - command.offerPercent) * 100)}%`
       addEvent(state, 'Торг удался', decision.negotiationNote, 'good')
+      awardProgress(state, player, 24, 'negotiation', 14)
       return { state, accepted: true }
     }
     const dealLost = random(state) < (command.offerPercent === 0.85 ? 0.62 : command.offerPercent === 0.9 ? 0.34 : 0.12)
@@ -449,9 +471,12 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
 
   if (command.type === 'BUY_BUSINESS') {
     if (decision.kind !== 'business') return reject(current, 'Сейчас нет сделки')
+    const business = businesses.find((item) => item.id === decision.businessId)
+    if (!business || business.requiredLevel > playerLevel(player)) return reject(current, `Для этой сделки нужен уровень ${business?.requiredLevel ?? '?'}`)
     const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId)
     if (!asset) return reject(current, command.funding === 'cash' ? 'Не хватает своих денег' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил эту схему финансирования')
     player.assets.push(asset)
+    awardProgress(state, player, 60, 'finance', 10)
     addEvent(state, 'Новый актив', `${asset.name}, доля ${Math.round(asset.ownership * 100)}%`, 'good')
     completeHumanTurn(state)
     return { state, accepted: true }
@@ -476,6 +501,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const outcomeAmount = Math.round((decision.minReturn + random(state) * (decision.maxReturn - decision.minReturn)) * difficultyPenalty)
     player.cash -= decision.investment
     player.resaleDeals.push({ id: uid(state, 'resale'), title: decision.title, investment: decision.investment, expectedMin: decision.minReturn, expectedMax: decision.maxReturn, resolvesMonth: state.month + decision.durationMonths, outcomeAmount, delays: 0 })
+    awardProgress(state, player, 25, 'brand', 8)
     addEvent(state, 'Товар куплен', `${decision.title}: вложено ${decision.investment.toLocaleString('ru-RU')} ₽, результат через ${decision.durationMonths} мес.`, 'neutral')
     completeHumanTurn(state)
     return { state, accepted: true }
@@ -550,10 +576,12 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   }
   if (command.type === 'TRAIN') {
     if (decision.kind !== 'growth') return reject(current, 'Обучение сейчас недоступно')
-    if (player.cash < command.cost) return reject(current, 'Не хватает денег на обучение')
-    player.cash -= command.cost
-    player.salary += Math.round(command.cost * 0.35)
-    addEvent(state, 'Рост дохода', `Активный доход вырос на ${Math.round(command.cost * 0.35).toLocaleString('ru-RU')} ₽/мес`, 'good')
+    if (skillLevel(player, command.skillId) >= 3) return reject(current, 'Этот навык уже развит до максимума')
+    const cost = trainingCost(player, command.skillId)
+    if (player.cash < cost) return reject(current, 'Не хватает денег на обучение')
+    player.cash -= cost
+    awardProgress(state, player, 65, command.skillId, 55)
+    addEvent(state, 'Навык прокачан', `Вложено ${cost.toLocaleString('ru-RU')} ₽ в развитие.`, 'good')
     completeHumanTurn(state)
     return { state, accepted: true }
   }
