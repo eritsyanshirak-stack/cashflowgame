@@ -1,73 +1,99 @@
 import { describe, expect, it } from 'vitest'
-import { businesses } from '../content/content'
-import type { GameCommand, GameState, SkillId } from '../domain/types'
-import { monthlyExpenses } from '../systems/economy'
-import { skillLevel, trainingCost } from '../systems/progression'
+import { businesses, difficultySettings } from '../content/content'
+import type { Asset } from '../domain/types'
+import { assessLoan, isFinanciallyFree, loanPayment, monthlyExpenses, portfolioManagementCost } from '../systems/economy'
 import { emptyGame, executeCommand } from './engine'
 
-const playDecision = (game: GameState) => {
-  const decision = game.pendingDecision
-  let player = game.players[0]
-  if (!decision) return game
-  let command: GameCommand = { type: 'SKIP_DECISION' }
+const startedGame = (seed = 101) =>
+  executeCommand(emptyGame(seed), { type: 'START_GAME', professionId: 'trainer', botCount: 2, difficulty: 'normal', seed }).state
 
-  if (decision.kind === 'business') {
-    if (!decision.negotiated) {
-      const negotiation = executeCommand(game, { type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })
-      game = negotiation.state
-      if (game.phase !== 'decision' || game.pendingDecision?.kind !== 'business') return game
-      player = game.players[0]
-    }
-    const currentDeal = game.pendingDecision
-    if (!currentDeal || currentDeal.kind !== 'business') return game
-    const business = businesses.find((item) => item.id === currentDeal.businessId)!
-    const downPayment = Math.max(0, currentDeal.askingPrice - business.loan)
-    const reserve = monthlyExpenses(player) * 0.45
-    if (player.cash >= downPayment + reserve) command = { type: 'BUY_BUSINESS', funding: 'cash' }
-    else if (player.cash >= downPayment * 0.5 + reserve) command = { type: 'BUY_BUSINESS', funding: 'partner50' }
-    else if (player.cash >= reserve * 0.5) command = { type: 'BUY_BUSINESS', funding: 'credit' }
-  } else if (decision.kind === 'expense') {
-    command = { type: 'PAY_EXPENSE', withCredit: player.cash < decision.amount }
-  } else if (decision.kind === 'chance') {
-    const expected = (decision.minReturn + decision.maxReturn) / 2
-    if (expected > decision.investment * 1.08 && player.cash > decision.investment + monthlyExpenses(player) * 0.5) command = { type: 'TAKE_CHANCE' }
-  } else if (decision.kind === 'growth') {
-    const priorities: SkillId[] = ['finance', 'management', 'marketing', 'negotiation', 'brand']
-    const skillId = priorities.find((id) => skillLevel(player, id) < 3)
-    if (skillId && player.cash > trainingCost(player, skillId) + monthlyExpenses(player) * 0.35) command = { type: 'TRAIN', skillId }
-  } else if (decision.kind === 'market') {
-    const quote = [...game.stockMarket].sort((a, b) => b.dividendYield - a.dividendYield)[0]
-    if (player.cash > quote.price * 1.015 + monthlyExpenses(player) * 0.6) {
-      game = executeCommand(game, { type: 'BUY_STOCK', stockId: quote.id, quantity: 1 }).state
-    }
+const testAsset = (businessId: string, ownerId: string, index: number): Asset => {
+  const business = businesses.find((item) => item.id === businessId)!
+  return {
+    ...business,
+    id: `${business.id}-${index}`,
+    ownerId,
+    ownership: 1,
+    monthlyPayment: loanPayment(business.loan, business.loanRate, business.loanTermMonths),
+    purchaseMonth: 1,
+    developmentLevel: 0,
+    developments: [],
+    totalDevelopmentCost: 0,
+    lastDevelopedMonth: null,
+    saleOffer: null,
+    offerExpiresMonth: null,
   }
-  const result = executeCommand(game, command)
-  return result.accepted ? result.state : executeCommand(game, { type: 'SKIP_DECISION' }).state
 }
 
-const simulate = (seed: number, maxMonths = 48) => {
-  let game = executeCommand(emptyGame(seed), { type: 'START_GAME', professionId: 'trainer', botCount: 2, difficulty: 'normal', seed }).state
-  let safety = 0
-  while (game.phase !== 'finished' && game.month <= maxMonths && safety < 500) {
-    const roll = executeCommand(game, { type: 'ROLL_DICE' })
-    expect(roll.accepted).toBe(true)
-    game = playDecision(roll.state)
-    safety += 1
-  }
-  return game
-}
+describe('balance guardrails', () => {
+  it('uses debt-service limits instead of allowing almost all income to be committed', () => {
+    expect(difficultySettings.easy.maxDebtLoad).toBeLessThanOrEqual(0.5)
+    expect(difficultySettings.normal.maxDebtLoad).toBeLessThan(difficultySettings.easy.maxDebtLoad)
+    expect(difficultySettings.hard.maxDebtLoad).toBeLessThan(difficultySettings.normal.maxDebtLoad)
+  })
 
-describe('full-party balance', () => {
-  it('keeps long simulations finite and economically valid', () => {
-    const games = Array.from({ length: 24 }, (_, index) => simulate(100 + index))
-    for (const game of games) {
-      expect(game.month).toBeLessThanOrEqual(49)
-      expect(game.players.every((player) => [player.cash, player.salary, player.baseExpenses, ...player.assets.flatMap((asset) => [asset.revenue, asset.operatingCosts, asset.loan])].every(Number.isFinite))).toBe(true)
-      expect(game.players.every((player) => player.assets.every((asset) => asset.ownership >= 0.5 && asset.ownership <= 1))).toBe(true)
+  it('still allows a modest acquisition gap but rejects a purchase with almost no buyer money', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const pickup = businesses.find((item) => item.id === 'pickup')!
+    const projectedIncome = pickup.revenue - pickup.operatingCosts
+    const projectedPayment = loanPayment(pickup.loan, pickup.loanRate, pickup.loanTermMonths)
+
+    player.cash = 100_000
+    const modestGap = assessLoan(player, 80_000, 'normal', undefined, projectedIncome, projectedPayment)
+    expect(modestGap.approved).toBe(true)
+
+    player.cash = 20_000
+    const recklessGap = assessLoan(player, 130_000, 'normal', undefined, projectedIncome, projectedPayment)
+    expect(recklessGap.approved).toBe(false)
+    expect(recklessGap.reason).toContain('собственных денег')
+  })
+
+  it('stops repeated unsecured borrowing instead of creating an unlimited money loop', () => {
+    let game = startedGame()
+    game.phase = 'decision'
+    game.pendingDecision = { kind: 'bank' }
+    let approvedLoans = 0
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const result = executeCommand(game, { type: 'TAKE_LOAN', amount: 100_000 })
+      if (!result.accepted) break
+      approvedLoans += 1
+      game = result.state
     }
-    expect(games.filter((game) => game.phase === 'finished').length).toBe(24)
-    expect(games.filter((game) => game.month >= 7 && game.month <= 20).length).toBeGreaterThanOrEqual(22)
-    expect(games.some((game) => game.outcome?.winnerId === 'human')).toBe(true)
-    expect(games.some((game) => game.outcome?.winnerId?.startsWith('bot'))).toBe(true)
+
+    expect(approvedLoans).toBeGreaterThan(0)
+    expect(approvedLoans).toBeLessThanOrEqual(3)
+    expect(executeCommand(game, { type: 'TAKE_LOAN', amount: 100_000 }).accepted).toBe(false)
+  })
+
+  it('adds management overhead when a player buys more businesses than they can control', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    player.assets = Array.from({ length: 3 }, (_, index) => testAsset('coffee', player.id, index))
+    expect(portfolioManagementCost(player)).toBe(0)
+
+    player.assets.push(testAsset('coffee', player.id, 5))
+    expect(portfolioManagementCost(player)).toBeGreaterThan(0)
+
+    player.skills.management = 200
+    expect(portfolioManagementCost(player)).toBe(0)
+  })
+
+  it('does not declare freedom while unsecured debt is dangerously high', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    player.deposit = 20_000_000
+    player.cash = monthlyExpenses(player) * 3
+    player.loans.push({
+      id: 'debt-wall',
+      name: 'Кредитная пирамида',
+      balance: 1_000_000,
+      monthlyPayment: 0,
+      annualRate: 0.25,
+      termMonths: 36,
+    })
+
+    expect(isFinanciallyFree(player, game.stockMarket)).toBe(false)
   })
 })

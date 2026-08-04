@@ -1,0 +1,87 @@
+name: Balance Patch CI
+
+on:
+  push:
+    branches:
+      - balance-v1.1
+  pull_request:
+    branches:
+      - rewrite/react-mvp
+
+concurrency:
+  group: balance-v1.2-materialization
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout balance branch
+        uses: actions/checkout@v4
+        with:
+          ref: balance-v1.1
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply pending financing audit fixes
+        id: audit_fixes
+        run: |
+          if [ -f scripts/apply_financing_audit_fixes.py ]; then
+            python3 scripts/apply_financing_audit_fixes.py
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Commit verified source changes
+        if: steps.audit_fixes.outputs.applied == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/apply_financing_audit_fixes.py
+          git add -A
+          git commit -m "fix: align deal financing preview with final bank decision"
+          git push origin HEAD:balance-v1.1
+
+      - name: Upload preview bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: balance-preview-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Publish clean static preview branch
+        run: |
+          rm -rf /tmp/balance-preview
+          mkdir -p /tmp/balance-preview
+          cp -R dist/. /tmp/balance-preview/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan balance-preview-static
+          git rm -rf . || true
+          git clean -fdx
+          cp -R /tmp/balance-preview/. .
+          sed -i 's|src="/assets/|src="assets/|g; s|href="/assets/|href="assets/|g' index.html
+          touch .nojekyll
+          git add -A
+          git commit -m "preview: audited balance ${GITHUB_SHA}"
+          git push --force origin HEAD:balance-preview-static

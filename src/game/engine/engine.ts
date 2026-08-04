@@ -1,10 +1,10 @@
-import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, initialStockMarket, marketHeadlines, professions } from '../content/content'
-import type { Asset, BotStrategy, CommandResult, Decision, Funding, GameCommand, GameEvent, GameState, Player } from '../domain/types'
-import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBankrupt, isFinanciallyFree, loanPayment, pledgedLoanForAsset } from '../systems/economy'
+import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, initialStockMarket, marketHeadlines, professions, rareDeals } from '../content/content'
+import type { Asset, BotStrategy, BusinessIssue, CommandResult, Decision, DueDiligence, Funding, GameCommand, GameEvent, GameState, Player, RiskRating } from '../domain/types'
+import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBankrupt, isFinanciallyFree, loanPayment, meetsFreedomConditions, pledgedLoanForAsset } from '../systems/economy'
 import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, trainingCost } from '../systems/progression'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 7,
+  version: 8,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -36,6 +36,18 @@ const addEvent = (state: GameState, title: string, description: string, tone: Ga
 }
 
 const botStrategies: BotStrategy[] = ['careful', 'balanced', 'aggressive']
+const issueByRisk: Record<RiskRating, number> = { low: 0.12, medium: 0.24, high: 0.38 }
+const issueLabels: Record<Exclude<BusinessIssue, 'none'>, string> = {
+  documents: 'Проблема с документами или лицензией',
+  lease: 'Слабый договор аренды и рост платежей',
+  repair: 'Скрытая поломка оборудования',
+  'hidden-debt': 'Неучтённый долг прошлого владельца',
+}
+
+const rollIssue = (state: GameState, risk: RiskRating, extraChance = 0): BusinessIssue => {
+  if (random(state) >= Math.min(0.8, issueByRisk[risk] + extraChance)) return 'none'
+  return pick(state, ['documents', 'lease', 'repair', 'hidden-debt'] as const)
+}
 
 const makePlayer = (professionId: string, name: string, isBot: boolean, index: number): Player => {
   const profession = professions.find((item) => item.id === professionId) ?? professions[0]
@@ -60,6 +72,8 @@ const makePlayer = (professionId: string, name: string, isBot: boolean, index: n
     status: 'active',
     eliminatedMonth: null,
     botStrategy: isBot ? botStrategies[(index - 1) % botStrategies.length] : undefined,
+    freedomStreak: 0,
+    restructuringUsed: false,
   }
 }
 
@@ -68,13 +82,27 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
     const player = state.players[0]
     const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(player))
     const business = pick(state, unlocked)
-    return { kind: 'business', businessId: business.id, askingPrice: business.price, negotiated: false }
+    return {
+      kind: 'business', businessId: business.id, askingPrice: business.price, negotiated: false,
+      inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating), issueRevealed: false,
+    }
   }
   if (type === 'expense') {
     const [title, amount] = pick(state, expenseCards)
     return { kind: 'expense', title, amount }
   }
   if (type === 'chance') {
+    const player = state.players[0]
+    const availableRareDeals = rareDeals.filter((item) => item.minLevel <= playerLevel(player))
+    if (availableRareDeals.length > 0 && random(state) < 0.38) {
+      const deal = pick(state, availableRareDeals)
+      const business = businesses.find((item) => item.id === deal.businessId)!
+      return {
+        kind: 'opportunity', opportunityId: deal.id, businessId: business.id,
+        askingPrice: Math.round(business.price * deal.discount), title: deal.title, description: deal.description,
+        inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating, deal.issueChance * 0.45), issueRevealed: false,
+      }
+    }
     const [title, investment, minReturn, maxReturn, durationMonths] = pick(state, chanceCards)
     return { kind: 'chance', title, investment, minReturn, maxReturn, durationMonths }
   }
@@ -96,11 +124,23 @@ const updateAssetMarket = (state: GameState, player: Player) => {
       asset.saleOffer = Math.round(asset.marketValue * premium)
       asset.offerExpiresMonth = state.month + 1
     }
-    asset.loan = Math.max(0, asset.loan - Math.round(asset.monthlyPayment * 0.7))
-    asset.monthlyPayment = asset.loan > 0 ? Math.min(asset.monthlyPayment, Math.round(asset.loan * 0.03)) : 0
+    if ((asset.launchMonthsRemaining ?? 0) > 0) {
+      asset.launchMonthsRemaining = Math.max(0, (asset.launchMonthsRemaining ?? 0) - 1)
+      if (asset.launchMonthsRemaining === 0 && !asset.legalIssue) asset.status = 'active'
+    }
+    if ((asset.incidentCooldown ?? 0) > 0) {
+      asset.incidentCooldown = Math.max(0, (asset.incidentCooldown ?? 0) - 1)
+      if (asset.incidentCooldown === 0 && !asset.issueCost && asset.status === 'stressed') {
+        asset.status = 'active'
+        asset.legalIssue = undefined
+      }
+    }
+    asset.loan = Math.max(0, asset.loan - Math.round(asset.monthlyPayment * 0.68))
+    asset.monthlyPayment = asset.loan > 0 ? loanPayment(asset.loan, asset.loanRate, Math.max(1, asset.loanTermMonths - Math.max(0, state.month - asset.purchaseMonth))) : 0
   })
   player.loans.forEach((loan) => {
     loan.balance = Math.max(0, loan.balance - Math.round(loan.monthlyPayment * 0.72))
+    loan.missedPayments = Math.max(0, (loan.missedPayments ?? 0) - 1)
     loan.termMonths = Math.max(0, loan.termMonths - 1)
     loan.monthlyPayment = loan.balance > 0 ? Math.min(loan.monthlyPayment, loanPayment(loan.balance, loan.annualRate, Math.max(1, loan.termMonths))) : 0
   })
@@ -141,24 +181,151 @@ const settleResales = (state: GameState, player: Player, nextMonth: number) => {
   return returns
 }
 
+const applyIssueToAsset = (asset: Asset, issue: BusinessIssue) => {
+  if (issue === 'none') return
+  asset.legalIssue = issueLabels[issue]
+  asset.issueMonths = 0
+  if (issue === 'documents') {
+    asset.status = 'suspended'
+    asset.issueCost = Math.round(asset.price * 0.08 * asset.ownership)
+    asset.marketValue = Math.round(assetMarketValue(asset) * 0.78)
+  } else if (issue === 'lease') {
+    asset.status = 'stressed'
+    asset.issueCost = Math.round(asset.price * 0.045 * asset.ownership)
+    asset.operatingCosts = Math.round(asset.operatingCosts * 1.18)
+  } else if (issue === 'repair') {
+    asset.status = 'stressed'
+    asset.issueCost = Math.round(asset.price * 0.06 * asset.ownership)
+    asset.marketValue = Math.round(assetMarketValue(asset) * 0.86)
+  } else {
+    asset.status = 'stressed'
+    const hiddenDebt = Math.round(asset.price * 0.09 * asset.ownership)
+    asset.loan += hiddenDebt
+    asset.monthlyPayment = loanPayment(asset.loan, Math.max(asset.loanRate, 0.28), asset.loanTermMonths)
+    asset.issueCost = Math.round(hiddenDebt * 0.35)
+  }
+}
+
+const processAssetRisks = (state: GameState, player: Player) => {
+  const difficultyMultiplier = state.difficulty === 'easy' ? 0.7 : state.difficulty === 'hard' ? 1.35 : 1
+  const managementProtection = Math.max(0.62, 1 - skillLevel(player, 'management') * 0.1)
+  for (const asset of [...player.assets]) {
+    if (asset.legalIssue) {
+      asset.issueMonths = (asset.issueMonths ?? 0) + 1
+      if ((asset.issueMonths ?? 0) >= 3 && asset.status === 'suspended') {
+        repossessAsset(state, player, asset, 'юридическая проблема не устранена, актив принудительно реализован')
+      }
+      continue
+    }
+    if ((asset.launchMonthsRemaining ?? 0) > 0 || (asset.incidentCooldown ?? 0) > 0) continue
+    const base = asset.riskRating === 'low' ? 0.04 : asset.riskRating === 'medium' ? 0.08 : 0.13
+    const diligenceProtection = asset.dueDiligence === 'full' ? 0.48 : asset.dueDiligence === 'basic' ? 0.72 : 1
+    if (random(state) >= base * difficultyMultiplier * managementProtection * diligenceProtection) continue
+    const issue = pick(state, ['documents', 'lease', 'repair'] as const)
+    applyIssueToAsset(asset, issue)
+    if (!player.isBot) addEvent(state, 'Проблема в бизнесе', `${asset.name}: ${issueLabels[issue]}.`, 'bad')
+  }
+}
+
+const addDeficiencyDebt = (state: GameState, player: Player, assetName: string, amount: number) => {
+  if (amount <= 0) return
+  const rate = 0.36
+  const termMonths = 36
+  player.loans.push({
+    id: uid(state, 'deficiency'), name: `Остаток после изъятия: ${assetName}`,
+    balance: amount, annualRate: rate, termMonths,
+    monthlyPayment: loanPayment(amount, rate, termMonths), missedPayments: 0,
+  })
+}
+
+const repossessAsset = (state: GameState, player: Player, asset: Asset, reason: string) => {
+  if (!player.assets.some((item) => item.id === asset.id)) return
+  const pledged = pledgedLoanForAsset(player, asset.id)
+  const forcedPrice = Math.round(assetMarketValue(asset) * 0.68)
+  const securedDebt = asset.loan + (pledged?.balance ?? 0)
+  const surplus = Math.max(0, forcedPrice - securedDebt)
+  const deficiency = Math.max(0, securedDebt - forcedPrice)
+  if (pledged) player.loans = player.loans.filter((loan) => loan.id !== pledged.id)
+  player.assets = player.assets.filter((item) => item.id !== asset.id)
+  player.cash += surplus
+  addDeficiencyDebt(state, player, asset.name, deficiency)
+  addEvent(state, 'Банк забрал актив', `${asset.name}: ${reason}. Продажа банком ${forcedPrice.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}.`, 'bad')
+}
+
+const coverShortfallFromReserves = (player: Player) => {
+  if (player.cash >= 0) return
+  const fromDeposit = Math.min(player.deposit, -player.cash)
+  player.deposit -= fromDeposit
+  player.cash += fromDeposit
+  const fromBonds = Math.min(player.bonds, -player.cash)
+  player.bonds -= fromBonds
+  player.cash += fromBonds
+}
+
+const handleDebtStress = (state: GameState, player: Player) => {
+  coverShortfallFromReserves(player)
+  if (player.cash >= 0) {
+    player.assets.forEach((asset) => { asset.missedPayments = Math.max(0, (asset.missedPayments ?? 0) - 1) })
+    return
+  }
+
+  addEvent(state, 'Просрочка платежей', `${player.name}: кассовый разрыв ${Math.abs(player.cash).toLocaleString('ru-RU')} ₽.`, player.isBot ? 'neutral' : 'bad')
+  player.assets.forEach((asset) => { if (asset.loan > 0) asset.missedPayments = (asset.missedPayments ?? 0) + 1 })
+  player.loans.forEach((loan) => { loan.missedPayments = (loan.missedPayments ?? 0) + 1 })
+
+  for (const loan of [...player.loans]) {
+    if (!loan.collateralAssetId || (loan.missedPayments ?? 0) < 2) continue
+    const collateral = player.assets.find((asset) => asset.id === loan.collateralAssetId)
+    if (collateral) repossessAsset(state, player, collateral, 'две просрочки по залоговому кредиту')
+  }
+  for (const asset of [...player.assets]) {
+    if ((asset.missedPayments ?? 0) >= 2 || ((asset.issueMonths ?? 0) >= 3 && asset.status === 'suspended')) {
+      repossessAsset(state, player, asset, (asset.missedPayments ?? 0) >= 2 ? 'две просрочки по кредиту бизнеса' : 'бизнес не устранил юридическую проблему')
+    }
+  }
+
+  const toxicLoan = player.loans.find((loan) => !loan.collateralAssetId && (loan.missedPayments ?? 0) >= 3)
+  if (toxicLoan) {
+    const forcedAsset = player.assets.filter((asset) => !pledgedLoanForAsset(player, asset.id)).sort((a, b) => assetMarketValue(b) - assetMarketValue(a))[0]
+    if (forcedAsset) {
+      const forcedPrice = Math.round(assetMarketValue(forcedAsset) * 0.64)
+      const before = player.cash
+      sellAsset(player, forcedAsset, forcedPrice)
+      const available = Math.max(0, player.cash - Math.max(0, before))
+      const payment = Math.min(available, toxicLoan.balance)
+      toxicLoan.balance -= payment
+      player.cash -= payment
+      toxicLoan.monthlyPayment = toxicLoan.balance > 0 ? loanPayment(toxicLoan.balance, toxicLoan.annualRate, Math.max(1, toxicLoan.termMonths)) : 0
+      addEvent(state, 'Принудительная продажа', `${forcedAsset.name} продан со скидкой для погашения просроченного долга.`, 'bad')
+      player.loans = player.loans.filter((loan) => loan.balance > 0)
+    }
+  }
+}
+
 const settleMonth = (state: GameState) => {
   const nextMonth = state.month + 1
   const resaleReturns = state.players.map((player) => player.status === 'active' ? settleResales(state, player, nextMonth) : 0)
+  state.players.forEach((player) => { if (player.status === 'active') processAssetRisks(state, player) })
   const humanReport = createMonthlyReport(state.players[0], state.month, state.stockMarket, resaleReturns[0])
   state.players.forEach((player, index) => {
     if (player.status !== 'active') return
     const report = createMonthlyReport(player, state.month, state.stockMarket, resaleReturns[index])
     player.cash += report.netCashflow
     player.baseDebt = Math.max(0, player.baseDebt - Math.round(player.baseDebt * 0.014))
+    handleDebtStress(state, player)
   })
   state.players.forEach((player) => {
     if (player.status === 'active') updateAssetMarket(state, player)
   })
   updateStockMarket(state)
+  state.players.forEach((player) => {
+    if (player.status !== 'active') return
+    player.freedomStreak = meetsFreedomConditions(player, state.stockMarket) ? (player.freedomStreak ?? 0) + 1 : 0
+  })
   state.month = nextMonth
   state.day = 1
   state.lastMonthlyReport = humanReport
-  addEvent(state, 'Итоги месяца', `Чистый результат: ${humanReport.netCashflow.toLocaleString('ru-RU')} ₽`, humanReport.netCashflow >= 0 ? 'good' : 'bad')
+  addEvent(state, 'Итоги месяца', `Чистый результат: ${humanReport.netCashflow.toLocaleString('ru-RU')} ₽. Устойчивость свободы: ${state.players[0].freedomStreak ?? 0}/3 мес.`, humanReport.netCashflow >= 0 ? 'good' : 'bad')
 }
 
 const advanceCalendar = (state: GameState) => {
@@ -169,21 +336,23 @@ const advanceCalendar = (state: GameState) => {
   if (state.day >= 30) settleMonth(state)
 }
 
-const makeAsset = (state: GameState, player: Player, businessId: string, funding: Funding, dealPrice?: number, collateralAssetId?: string): Asset | null => {
+const makeAsset = (state: GameState, player: Player, businessId: string, funding: Funding, dealPrice?: number, collateralAssetId?: string, diligence: DueDiligence = 'none', hiddenIssue: BusinessIssue = 'none'): Asset | null => {
   const business = businesses.find((item) => item.id === businessId)
   if (!business) return null
   const ownership = funding === 'partner30' ? 0.7 : funding === 'partner50' ? 0.5 : 1
   const purchasePrice = dealPrice ?? business.price
-  const downPayment = Math.round(Math.max(0, purchasePrice - business.loan) * ownership)
+  const financedLoan = Math.min(purchasePrice, Math.round(business.loan * (purchasePrice / business.price)))
+  const downPayment = Math.round(Math.max(0, purchasePrice - financedLoan) * ownership)
   const acquisitionGap = Math.max(0, downPayment - player.cash)
   if (funding === 'cash' && acquisitionGap > 0) return null
   if ((funding === 'partner30' || funding === 'partner50') && acquisitionGap > 0) return null
+  const assetLoan = Math.round(financedLoan * ownership)
+  const projectedAssetPayment = loanPayment(assetLoan, business.loanRate, business.loanTermMonths)
   if ((funding === 'credit' || funding === 'secured') && acquisitionGap > 0) {
     if (funding === 'credit' && player.cash < downPayment * 0.3) return null
     const collateral = funding === 'secured' ? player.assets.find((asset) => asset.id === collateralAssetId) : undefined
     if (funding === 'secured' && !collateral) return null
     const projectedIncome = Math.round((business.revenue - business.operatingCosts) * ownership)
-    const projectedAssetPayment = Math.round(business.loan * ownership * 0.015)
     const assessment = assessLoan(player, acquisitionGap, state.difficulty, collateral, projectedIncome, projectedAssetPayment)
     if (!assessment.approved) return null
     player.loans.push({
@@ -194,12 +363,12 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
       annualRate: assessment.annualRate,
       termMonths: assessment.termMonths,
       collateralAssetId: collateral?.id,
+      missedPayments: 0,
     })
     player.cash += acquisitionGap
   }
   player.cash -= downPayment
-  const assetLoan = Math.round(business.loan * ownership)
-  return {
+  const asset: Asset = {
     ...business,
     id: uid(state, business.id),
     ownerId: player.id,
@@ -209,7 +378,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     loan: assetLoan,
     revenue: Math.round(business.revenue * ownership),
     operatingCosts: Math.round(business.operatingCosts * ownership),
-    monthlyPayment: Math.round(assetLoan * 0.015),
+    monthlyPayment: projectedAssetPayment,
     purchaseMonth: state.month,
     developmentLevel: 0,
     developments: [],
@@ -217,7 +386,15 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     lastDevelopedMonth: null,
     saleOffer: null,
     offerExpiresMonth: null,
+    status: 'launching',
+    dueDiligence: diligence,
+    launchMonthsRemaining: business.category === 'Недвижимость' ? 1 : 2,
+    incidentCooldown: 0,
+    issueMonths: 0,
+    missedPayments: 0,
   }
+  applyIssueToAsset(asset, hiddenIssue)
+  return asset
 }
 
 const applyDevelopment = (asset: Asset, developmentId: string, cost: number, marketingLevel = 0) => {
@@ -236,18 +413,38 @@ const applyDevelopment = (asset: Asset, developmentId: string, cost: number, mar
 const sellAsset = (player: Player, asset: Asset, grossPrice: number) => {
   const collateralLoan = pledgedLoanForAsset(player, asset.id)
   const collateralDebt = collateralLoan?.balance ?? 0
-  const equityBeforeCollateral = Math.max(0, grossPrice - asset.loan)
-  const collateralPayment = Math.min(equityBeforeCollateral, collateralDebt)
-  const proceeds = equityBeforeCollateral - collateralPayment
-  if (collateralLoan) {
-    collateralLoan.balance -= collateralPayment
-    collateralLoan.collateralAssetId = undefined
-    collateralLoan.monthlyPayment = collateralLoan.balance > 0 ? loanPayment(collateralLoan.balance, collateralLoan.annualRate, Math.max(1, collateralLoan.termMonths)) : 0
-    if (collateralLoan.balance === 0) player.loans = player.loans.filter((loan) => loan.id !== collateralLoan.id)
+  const totalSecuredDebt = asset.loan + collateralDebt
+  const proceeds = Math.max(0, grossPrice - totalSecuredDebt)
+  const deficiency = Math.max(0, totalSecuredDebt - grossPrice)
+  const bankPayment = Math.min(grossPrice, totalSecuredDebt)
+  if (collateralLoan) player.loans = player.loans.filter((loan) => loan.id !== collateralLoan.id)
+  if (deficiency > 0) {
+    const rate = 0.36
+    const termMonths = 36
+    player.loans.push({ id: `sale-deficiency-${asset.id}`, name: `Остаток после продажи: ${asset.name}`, balance: deficiency, monthlyPayment: loanPayment(deficiency, rate, termMonths), annualRate: rate, termMonths, missedPayments: 0 })
   }
   player.cash += proceeds
   player.assets = player.assets.filter((item) => item.id !== asset.id)
-  return { proceeds, collateralPayment }
+  const businessLoanPayment = Math.min(asset.loan, bankPayment)
+  const collateralPayment = Math.max(0, bankPayment - businessLoanPayment)
+  return { proceeds, collateralPayment, bankPayment, deficiency }
+}
+
+
+const liquidateAssetsForDeal = (player: Player, saleAssetIds: string[] | undefined, collateralAssetId?: string) => {
+  const ids = [...new Set(saleAssetIds ?? [])]
+  if (collateralAssetId && ids.includes(collateralAssetId)) {
+    return { ok: false as const, error: 'Один актив нельзя одновременно продать и заложить' }
+  }
+  const assets = ids.map((id) => player.assets.find((asset) => asset.id === id))
+  if (assets.some((asset) => !asset)) return { ok: false as const, error: 'Один из выбранных активов уже недоступен' }
+
+  const sold: Array<{ name: string; proceeds: number }> = []
+  for (const asset of assets as Asset[]) {
+    const result = sellAsset(player, asset, assetMarketValue(asset))
+    sold.push({ name: asset.name, proceeds: result.proceeds })
+  }
+  return { ok: true as const, sold }
 }
 
 const awardProgress = (state: GameState, player: Player, experience: number, skillId?: Parameters<typeof grantProgress>[2], skillPoints = 0) => {
@@ -275,8 +472,7 @@ const runBots = (state: GameState) => {
       const offerPremium = asset.saleOffer ? asset.saleOffer / Math.max(1, assetMarketValue(asset)) : 0
       const weakAsset = assetCashflow(asset) < 0
       if ((offerPremium > (strategy === 'aggressive' ? 1.16 : 1.08) || weakAsset) && random(state) < settings.botActivity) {
-        bot.cash += Math.max(0, (asset.saleOffer ?? assetMarketValue(asset)) - asset.loan)
-        bot.assets = bot.assets.filter((item) => item.id !== asset.id)
+        sellAsset(bot, asset, asset.saleOffer ?? assetMarketValue(asset))
         addEvent(state, 'Соперник продал актив', `${bot.name} вышел из ${asset.name}`)
       }
     }
@@ -299,13 +495,15 @@ const runBots = (state: GameState) => {
     if (cell.type === 'business' && random(state) < settings.botActivity * risk) {
       const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(bot))
       const business = pick(state, unlocked)
-      const payment = Math.round(business.loan * 0.015)
+      const payment = loanPayment(business.loan, business.loanRate, business.loanTermMonths)
       const profitable = business.revenue - business.operatingCosts - payment > 0
-      const reserve = bot.baseExpenses * (strategy === 'careful' ? 1 : strategy === 'aggressive' ? 0.15 : 0.5)
+      const reserve = bot.baseExpenses * (strategy === 'careful' ? 2 : strategy === 'aggressive' ? 0.6 : 1.2)
       if (profitable && bot.cash > business.downPayment * 0.3 + reserve) {
         const funding: Funding = bot.cash >= business.downPayment + reserve ? 'cash' : bot.cash >= business.downPayment * 0.5 + reserve ? 'partner50' : 'credit'
         const discount = random(state) < settings.negotiationChance * 0.45 ? 0.92 : 1
-        const asset = makeAsset(state, bot, business.id, funding, Math.round(business.price * discount))
+        const diligence: DueDiligence = strategy === 'careful' ? 'full' : strategy === 'balanced' ? 'basic' : 'none'
+        const hiddenIssue = diligence === 'full' ? 'none' : rollIssue(state, business.riskRating, diligence === 'basic' ? -0.1 : 0)
+        const asset = makeAsset(state, bot, business.id, funding, Math.round(business.price * discount), undefined, diligence, hiddenIssue)
         if (asset) {
           bot.assets.push(asset)
           awardProgress(state, bot, 55, 'finance', 8)
@@ -403,6 +601,20 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   if (state.phase === 'setup' || state.phase === 'finished') return reject(current, 'Команда сейчас недоступна')
   const player = state.players[0]
 
+  if (command.type === 'RESOLVE_ASSET_ISSUE') {
+    if (state.phase !== 'ready') return reject(current, 'Проблему можно решать между ходами')
+    const asset = player.assets.find((item) => item.id === command.assetId)
+    if (!asset || !asset.legalIssue || !asset.issueCost) return reject(current, 'У этого актива нет проблемы, требующей оплаты')
+    if (player.cash < asset.issueCost) return reject(current, 'Не хватает денег на устранение проблемы')
+    player.cash -= asset.issueCost
+    addEvent(state, 'Проблема устранена', `${asset.name}: ${asset.legalIssue}. Потрачено ${asset.issueCost.toLocaleString('ru-RU')} ₽.`, 'good')
+    asset.legalIssue = undefined
+    asset.issueCost = undefined
+    asset.issueMonths = 0
+    asset.status = (asset.launchMonthsRemaining ?? 0) > 0 ? 'launching' : 'active'
+    return { state, accepted: true }
+  }
+
   if (command.type === 'DEVELOP_ASSET') {
     if (state.phase !== 'ready') return reject(current, 'Развитие доступно между ходами')
     const asset = player.assets.find((item) => item.id === command.assetId)
@@ -449,8 +661,8 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
     const marketValue = assetMarketValue(asset)
-    const { proceeds, collateralPayment } = sellAsset(player, asset, marketValue)
-    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, банку ${(asset.loan + collateralPayment).toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽`, proceeds >= asset.downPayment ? 'good' : 'neutral')
+    const { proceeds, bankPayment, deficiency } = sellAsset(player, asset, marketValue)
+    addEvent(state, 'Актив продан', `${asset.name}: ${marketValue.toLocaleString('ru-RU')} ₽, банку ${bankPayment.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, proceeds >= asset.downPayment ? 'good' : deficiency > 0 ? 'bad' : 'neutral')
     return { state, accepted: true }
   }
 
@@ -503,6 +715,25 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     return { state, accepted: true }
   }
 
+  if (command.type === 'INSPECT_BUSINESS') {
+    if (decision.kind !== 'business' && decision.kind !== 'opportunity') return reject(current, 'Сейчас нечего проверять')
+    if (decision.inspection && decision.inspection !== 'none') return reject(current, 'Проверка уже проведена')
+    const business = businesses.find((item) => item.id === decision.businessId)!
+    const downPayment = Math.max(0, decision.askingPrice - business.loan)
+    const cost = command.level === 'full' ? Math.max(35_000, Math.round(downPayment * 0.08)) : Math.max(12_000, Math.round(downPayment * 0.03))
+    if (player.cash < cost) return reject(current, 'Не хватает денег на проверку')
+    player.cash -= cost
+    decision.inspection = command.level
+    const revealChance = command.level === 'full' ? 1 : Math.min(0.9, 0.64 + skillLevel(player, 'finance') * 0.08)
+    decision.issueRevealed = random(state) < revealChance
+    const result = decision.issueRevealed
+      ? (decision.hiddenIssue && decision.hiddenIssue !== 'none' ? issueLabels[decision.hiddenIssue] : 'Существенных проблем не найдено')
+      : 'Базовая проверка не дала однозначного ответа'
+    addEvent(state, command.level === 'full' ? 'Полная проверка сделки' : 'Базовая проверка сделки', `${business.name}: ${result}. Стоимость ${cost.toLocaleString('ru-RU')} ₽.`, decision.issueRevealed && decision.hiddenIssue && decision.hiddenIssue !== 'none' ? 'bad' : 'neutral')
+    awardProgress(state, player, 18, 'finance', 8)
+    return { state, accepted: true }
+  }
+
   if (command.type === 'SKIP_DECISION') {
     addEvent(state, 'Решение пропущено', 'Ты сохранил деньги и завершил ход.')
     completeHumanTurn(state)
@@ -513,11 +744,40 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (decision.kind !== 'business') return reject(current, 'Сейчас нет сделки')
     const business = businesses.find((item) => item.id === decision.businessId)
     if (!business || business.requiredLevel > playerLevel(player)) return reject(current, `Для этой сделки нужен уровень ${business?.requiredLevel ?? '?'}`)
-    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId)
-    if (!asset) return reject(current, command.funding === 'cash' ? 'Не хватает своих денег' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил эту схему финансирования')
+
+    const liquidation = liquidateAssetsForDeal(player, command.saleAssetIds, command.collateralAssetId)
+    if (!liquidation.ok) return reject(current, liquidation.error)
+    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none')
+    if (!asset) return reject(current, command.funding === 'cash' ? 'Даже после продажи выбранных активов денег не хватает' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил итоговую схему финансирования')
+
     player.assets.push(asset)
+    if (liquidation.sold.length > 0) {
+      const total = liquidation.sold.reduce((sum, item) => sum + item.proceeds, 0)
+      addEvent(state, 'Активы проданы для сделки', `${liquidation.sold.map((item) => item.name).join(', ')}. На первый взнос направлено ${total.toLocaleString('ru-RU')} ₽.`, 'neutral')
+    }
     awardProgress(state, player, 60, 'finance', 10)
     addEvent(state, 'Новый актив', `${asset.name}, доля ${Math.round(asset.ownership * 100)}%`, 'good')
+    completeHumanTurn(state)
+    return { state, accepted: true }
+  }
+
+  if (command.type === 'BUY_OPPORTUNITY') {
+    if (decision.kind !== 'opportunity') return reject(current, 'Сейчас нет редкой сделки')
+    const deal = rareDeals.find((item) => item.id === decision.opportunityId)
+    if (!deal || deal.minLevel > playerLevel(player)) return reject(current, `Для этой возможности нужен уровень ${deal?.minLevel ?? '?'}`)
+
+    const liquidation = liquidateAssetsForDeal(player, command.saleAssetIds, command.collateralAssetId)
+    if (!liquidation.ok) return reject(current, liquidation.error)
+    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none')
+    if (!asset) return reject(current, 'Не удалось профинансировать эту возможность выбранной схемой')
+
+    player.assets.push(asset)
+    if (liquidation.sold.length > 0) {
+      const total = liquidation.sold.reduce((sum, item) => sum + item.proceeds, 0)
+      addEvent(state, 'Активы проданы для возможности', `${liquidation.sold.map((item) => item.name).join(', ')}. Получено ${total.toLocaleString('ru-RU')} ₽.`, 'neutral')
+    }
+    awardProgress(state, player, 85, 'finance', 14)
+    addEvent(state, 'Редкая возможность куплена', `${decision.title}: ${asset.name} за ${decision.askingPrice.toLocaleString('ru-RU')} ₽.`, 'good')
     completeHumanTurn(state)
     return { state, accepted: true }
   }
@@ -527,7 +787,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (command.withCredit || player.cash < decision.amount) {
       const borrowed = command.withCredit ? decision.amount : decision.amount - player.cash
       if (!command.withCredit) player.cash = 0
-      player.loans.push({ id: uid(state, 'expense-loan'), name: decision.title, balance: borrowed, monthlyPayment: Math.round(borrowed * 0.05), annualRate: 0.42, termMonths: 24 })
+      player.loans.push({ id: uid(state, 'expense-loan'), name: decision.title, balance: borrowed, monthlyPayment: Math.round(borrowed * 0.05), annualRate: 0.42, termMonths: 24, missedPayments: 0 })
     } else player.cash -= decision.amount
     addEvent(state, 'Непредвиденный расход', `${decision.title}: ${decision.amount.toLocaleString('ru-RU')} ₽`, 'bad')
     completeHumanTurn(state)
@@ -597,7 +857,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const assessment = assessLoan(player, command.amount, state.difficulty, collateral)
     if (!assessment.approved) return reject(current, assessment.reason)
     player.cash += command.amount
-    player.loans.push({ id: uid(state, 'bank-loan'), name: collateral ? `Кредит под залог: ${collateral.name}` : 'Банковский кредит', balance: command.amount, monthlyPayment: assessment.monthlyPayment, annualRate: assessment.annualRate, termMonths: assessment.termMonths, collateralAssetId: collateral?.id })
+    player.loans.push({ id: uid(state, 'bank-loan'), name: collateral ? `Кредит под залог: ${collateral.name}` : 'Банковский кредит', balance: command.amount, monthlyPayment: assessment.monthlyPayment, annualRate: assessment.annualRate, termMonths: assessment.termMonths, collateralAssetId: collateral?.id, missedPayments: 0 })
     return { state, accepted: true }
   }
   if (command.type === 'REPAY_LOAN') {
