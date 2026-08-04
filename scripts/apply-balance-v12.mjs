@@ -21,9 +21,9 @@ const replaceAllRequired = (path, from, to) => {
 const contentPath = 'src/game/content/content.ts'
 replaceRequired(
   contentPath,
-  `  easy: { label: 'Спокойно', description: 'Рынок мягче, торг проще', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48, maxDebtLoad: 0.5, unsecuredRate: 0.2, securedRate: 0.14, resaleDelayChance: 0.08 },
-  normal: { label: 'Баланс', description: 'Честная конкуренция', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.72, maxDebtLoad: 0.38, unsecuredRate: 0.25, securedRate: 0.18, resaleDelayChance: 0.15 },
-  hard: { label: 'Жёстко', description: 'Сильные боты и нервный рынок', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86, maxDebtLoad: 0.3, unsecuredRate: 0.31, securedRate: 0.23, resaleDelayChance: 0.24 },`,
+  `  easy: { label: 'Спокойно', description: 'Банк мягче, рынок спокойнее', negotiationChance: 0.76, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.48, maxDebtLoad: 0.48, unsecuredRate: 0.2, securedRate: 0.14, resaleDelayChance: 0.08 },
+  normal: { label: 'Баланс', description: 'Кредиты требуют запаса прочности', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.72, maxDebtLoad: 0.38, unsecuredRate: 0.25, securedRate: 0.18, resaleDelayChance: 0.15 },
+  hard: { label: 'Жёстко', description: 'Дорогой долг и строгий банк', negotiationChance: 0.46, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.86, maxDebtLoad: 0.3, unsecuredRate: 0.31, securedRate: 0.23, resaleDelayChance: 0.24 },`,
   `  easy: { label: 'Спокойно', description: 'Больше запаса на ошибку', negotiationChance: 0.78, marketVolatility: 0.05, offerChance: 0.52, botActivity: 0.74, maxDebtLoad: 0.5, unsecuredRate: 0.2, securedRate: 0.14, resaleDelayChance: 0.08 },
   normal: { label: 'Баланс', description: 'Кредиты и бизнес требуют расчёта', negotiationChance: 0.6, marketVolatility: 0.09, offerChance: 0.42, botActivity: 0.9, maxDebtLoad: 0.38, unsecuredRate: 0.25, securedRate: 0.18, resaleDelayChance: 0.15 },
   hard: { label: 'Жёстко', description: 'Сильные соперники и дорогие ошибки', negotiationChance: 0.44, marketVolatility: 0.14, offerChance: 0.34, botActivity: 0.98, maxDebtLoad: 0.3, unsecuredRate: 0.31, securedRate: 0.23, resaleDelayChance: 0.24 },`,
