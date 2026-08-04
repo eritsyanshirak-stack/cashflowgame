@@ -323,3 +323,91 @@ h1 em { color: var(--game-green); -webkit-text-stroke: 0; }
   0%, 100% { box-shadow: 0 0 0 2px var(--game-gold), 0 7px 14px rgba(20,92,67,.25); }
   50% { box-shadow: 0 0 0 3px #ffe28b, 0 9px 20px rgba(20,92,67,.42); }
 }
+
+.tutorial-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(13, 25, 20, .78);
+  backdrop-filter: blur(10px);
+}
+.tutorial-card {
+  position: relative;
+  width: min(100%, 420px);
+  padding: 28px 24px 24px;
+  overflow: hidden;
+  border: 1px solid #d5c9ae;
+  border-radius: 28px;
+  background: #fffdf7;
+  box-shadow: 0 18px 0 rgba(8, 40, 29, .25), 0 35px 80px rgba(0, 0, 0, .35);
+  text-align: center;
+}
+.tutorial-card::before { content: ''; position: absolute; inset: 0 0 auto; height: 7px; background: linear-gradient(90deg, var(--game-green), var(--game-gold), var(--game-red)); }
+.tutorial-skip { position: absolute; z-index: 2; top: 16px; right: 16px; padding: 8px 10px; color: #726b60; border: 0; background: transparent; font-size: 12px; font-weight: 700; }
+.tutorial-art { position: relative; display: grid; width: 132px; height: 132px; margin: 10px auto 24px; place-items: center; border: 1px solid #cab98e; border-radius: 50%; background: radial-gradient(circle, #fff 0 43%, #efe6ce 44% 56%, #1b6e53 57% 61%, #f5c651 62% 100%); box-shadow: 0 9px 0 #b7a16b, 0 18px 28px rgba(75, 60, 30, .18); }
+.tutorial-art span { z-index: 1; display: grid; width: 66px; height: 66px; place-items: center; color: #fff; border-radius: 20px; background: var(--game-green); box-shadow: 0 5px 0 var(--game-green-dark); font: 800 36px Oswald; transform: rotate(-4deg); }
+.tutorial-art i { position: absolute; width: 18px; height: 18px; border: 4px dashed #fff9dd; border-radius: 50%; background: var(--game-red); box-shadow: 0 2px 0 #a83d38; }
+.tutorial-art i:nth-of-type(1) { top: 9px; left: 17px; }
+.tutorial-art i:nth-of-type(2) { right: 8px; bottom: 25px; background: var(--game-blue); box-shadow: 0 2px 0 #315f98; }
+.tutorial-art i:nth-of-type(3) { bottom: 6px; left: 35px; background: var(--game-purple); box-shadow: 0 2px 0 #68458b; }
+.tutorial-card .eyebrow { color: var(--game-green); }
+.tutorial-card h2 { margin: 8px 0 10px; color: var(--game-ink); font: 800 31px/1 Oswald, sans-serif; }
+.tutorial-card p { min-height: 72px; margin: 0; color: #68665f; font-size: 14px; line-height: 1.55; }
+.tutorial-dots { display: flex; justify-content: center; gap: 7px; margin: 20px 0; }
+.tutorial-dots i { width: 7px; height: 7px; border-radius: 99px; background: #d9d4ca; transition: width .2s ease, background .2s ease; }
+.tutorial-dots i.active { width: 24px; background: var(--game-green); }
+.tutorial-card .primary-action { width: 100%; }
+
+.confirm-sheet { text-align: center; }
+.confirm-sheet .decision-symbol { margin-inline: auto; }
+.danger-action { width: 100%; min-height: 48px; margin-top: 16px; color: #fff; border: 0; border-radius: 14px; background: linear-gradient(#db6158, #b8423b); box-shadow: 0 4px 0 #8f302b; font-weight: 800; }
+
+.event-flash {
+  position: fixed;
+  z-index: 70;
+  top: max(70px, env(safe-area-inset-top));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 28px), 440px);
+  padding: 11px 13px;
+  border: 1px solid #d9d3c8;
+  border-radius: 16px;
+  background: rgba(255, 253, 248, .97);
+  box-shadow: 0 12px 35px rgba(25, 35, 29, .2);
+  transform: translateX(-50%);
+  animation: flash-in .24s ease-out both, flash-out .24s ease-in 1.62s both;
+}
+.event-flash > i { display: grid; flex: 0 0 34px; height: 34px; place-items: center; color: #fff; border-radius: 11px; background: #79827e; font-style: normal; font-weight: 900; }
+.event-flash.good > i { background: var(--game-green); }
+.event-flash.bad > i { background: var(--game-red); }
+.event-flash span { min-width: 0; display: grid; }
+.event-flash b { font-size: 13px; }
+.event-flash small { overflow: hidden; color: #6f716d; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .roll-button.rolling .dice-face { animation: dice-roll .42s cubic-bezier(.2,.8,.2,1) infinite; }
+  .moving-token { transition: transform .11s ease; animation: token-hop .18s ease-out; }
+  .tutorial-card { animation: tutorial-in .32s cubic-bezier(.2,.9,.25,1.1) both; }
+}
+
+@keyframes dice-roll { 0% { transform: rotate(-8deg) scale(1); } 35% { transform: rotate(115deg) scale(1.16); } 70% { transform: rotate(245deg) scale(.94); } 100% { transform: rotate(352deg) scale(1); } }
+@keyframes token-hop { 50% { transform: translateY(-7px) scale(1.18); } }
+@keyframes tutorial-in { from { opacity: 0; transform: translateY(24px) scale(.96); } }
+@keyframes flash-in { from { opacity: 0; transform: translate(-50%, -14px) scale(.97); } }
+@keyframes flash-out { to { opacity: 0; transform: translate(-50%, -10px) scale(.98); } }
+
+@media (max-height: 690px) {
+  .tutorial-card { padding-top: 22px; }
+  .tutorial-art { width: 98px; height: 98px; margin-bottom: 16px; }
+  .tutorial-art span { width: 52px; height: 52px; font-size: 28px; }
+  .tutorial-card p { min-height: 58px; font-size: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

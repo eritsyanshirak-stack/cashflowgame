@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import './premium.css'
 import './tabletop.css'
@@ -10,6 +10,14 @@ import { useGameStore } from './store/gameStore'
 import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
+const TUTORIAL_KEY = 'vyhod-iz-kruga-tutorial-v1'
+
+const tutorialSteps = [
+  { icon: '◎', eyebrow: 'ЦЕЛЬ ПАРТИИ', title: 'Выйди из денежного круга', text: 'Побеждает не тот, у кого больше денег на руках. Пассивный доход должен покрыть расходы, а в запасе нужен резерв на три месяца.' },
+  { icon: '⚄', eyebrow: 'КАЖДЫЙ ХОД', title: 'Бросай и принимай решение', text: 'Клетки дают сделки, расходы, рынок, банк и развитие. Любое решение меняет твою экономику, а соперники ходят следом.' },
+  { icon: '◆', eyebrow: 'ГЛАВНЫЙ ПРИНЦИП', title: 'Покупай денежный поток', text: 'Смотри на чистый доход бизнеса после расходов и долгов. Дорогой актив без положительного потока не приближает к свободе.' },
+  { icon: '♟', eyebrow: 'ГОНКА', title: 'Соперники могут победить раньше', text: 'Следи за вкладкой "Гонка", не перегружай себя кредитами и оставляй запас денег на непредвиденные расходы.' },
+] as const
 
 function SetupScreen() {
   const [professionId, setProfessionId] = useState('trainer')
@@ -63,16 +71,49 @@ function GameScreen() {
   const error = useGameStore((store) => store.error)
   const [tab, setTab] = useState<'board' | 'race' | 'assets' | 'journal'>('board')
   const [dismissedReportMonth, setDismissedReportMonth] = useState<number | null>(null)
+  const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TUTORIAL_KEY))
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [rollAnimation, setRollAnimation] = useState(false)
+  const [eventFlash, setEventFlash] = useState(false)
+  const previousEventId = useRef(game.events[0]?.id)
+  const rollTimer = useRef<number | null>(null)
   const player = game.players[0]
   const freedom = Math.min(100, Math.round((passiveIncome(player, game.stockMarket) / Math.max(1, monthlyExpenses(player))) * 100))
   const report = game.lastMonthlyReport
   const level = playerLevel(player)
   const nextLevelXp = nextPlayerLevelXp(player)
 
+  useEffect(() => {
+    const eventId = game.events[0]?.id
+    if (!eventId || eventId === previousEventId.current || game.pendingDecision) return
+    previousEventId.current = eventId
+    setEventFlash(true)
+    const timer = window.setTimeout(() => setEventFlash(false), 1900)
+    return () => window.clearTimeout(timer)
+  }, [game.events, game.pendingDecision])
+
+  useEffect(() => () => {
+    if (rollTimer.current) window.clearTimeout(rollTimer.current)
+  }, [])
+
+  const roll = () => {
+    if (rollAnimation || game.phase !== 'ready') return
+    setRollAnimation(true)
+    rollTimer.current = window.setTimeout(() => {
+      dispatch({ type: 'ROLL_DICE' })
+      rollTimer.current = window.setTimeout(() => setRollAnimation(false), 1050)
+    }, 420)
+  }
+
+  const finishTutorial = () => {
+    localStorage.setItem(TUTORIAL_KEY, 'seen')
+    setShowTutorial(false)
+  }
+
   return <main className="game-shell">
     <header className="topbar">
       <div><span className="eyebrow">ВЫХОД ИЗ КРУГА</span><strong>Месяц {game.month} · День {game.day}</strong></div>
-      <button className="icon-button" aria-label="Новая игра" onClick={resetGame}>↻</button>
+      <button className="icon-button" aria-label="Новая игра" onClick={() => setConfirmReset(true)}>↻</button>
     </header>
 
     <section className="hero-stats">
@@ -87,15 +128,18 @@ function GameScreen() {
       </div>
     </section>
 
-    {tab === 'board' && <Board onRoll={() => dispatch({ type: 'ROLL_DICE' })} />}
+    {tab === 'board' && <Board onRoll={roll} rolling={rollAnimation} />}
     {tab === 'race' && <Race />}
     {tab === 'assets' && <Assets />}
     {tab === 'journal' && <Journal />}
 
     {error && <div className="toast">{error}</div>}
-    {game.pendingDecision && <DecisionSheet decision={game.pendingDecision} dispatch={dispatch} />}
+    {eventFlash && game.events[0] && <div className={`event-flash ${game.events[0].tone ?? 'neutral'}`}><i>{game.events[0].tone === 'good' ? '+' : game.events[0].tone === 'bad' ? '−' : '•'}</i><span><b>{game.events[0].title}</b><small>{game.events[0].description}</small></span></div>}
+    {game.pendingDecision && !rollAnimation && <DecisionSheet decision={game.pendingDecision} dispatch={dispatch} />}
     {report && dismissedReportMonth !== report.month && <MonthlyReportSheet report={report} onClose={() => setDismissedReportMonth(report.month)} />}
     {game.phase === 'finished' && <GameResult game={game} onReset={resetGame} />}
+    {showTutorial && <Tutorial onClose={finishTutorial} />}
+    {confirmReset && <ConfirmReset onCancel={() => setConfirmReset(false)} onConfirm={resetGame} />}
 
     <nav className="bottom-nav">
       <button className={tab === 'board' ? 'active' : ''} onClick={() => setTab('board')}><span>▦</span>Поле</button>
@@ -106,11 +150,26 @@ function GameScreen() {
   </main>
 }
 
-function Board({ onRoll }: { onRoll: () => void }) {
+function Board({ onRoll, rolling }: { onRoll: () => void; rolling: boolean }) {
   const game = useGameStore((store) => store.game)
   const player = game.players[0]
   const currentCell = board[player.position]
   const boardFreedom = freedomProgress(player, game.stockMarket)
+  const [visualPosition, setVisualPosition] = useState(player.position)
+  const previousTarget = useRef(player.position)
+
+  useEffect(() => {
+    if (player.position === previousTarget.current) return
+    const start = previousTarget.current
+    const steps = game.lastRoll ?? ((player.position - start + board.length) % board.length)
+    previousTarget.current = player.position
+    const timers = Array.from({ length: steps }, (_, index) => window.setTimeout(
+      () => setVisualPosition((start + index + 1) % board.length),
+      90 + index * 125,
+    ))
+    return () => timers.forEach(window.clearTimeout)
+  }, [game.lastRoll, player.position])
+
   return <section className="board-section">
     <div className="turn-card">
       <div><small>ТВОЙ ХОД</small><strong>{currentCell.icon} {currentCell.label}</strong></div>
@@ -118,24 +177,42 @@ function Board({ onRoll }: { onRoll: () => void }) {
     </div>
     <div className="board-frame">
       <div className="board-track">
-      {board.map((cell, index) => <div className={`tile tile-${cell.type} ${index === player.position ? 'current' : ''}`} key={`${cell.type}-${index}`}>
+      {board.map((cell, index) => <div className={`tile tile-${cell.type} ${index === visualPosition ? 'current' : ''}`} key={`${cell.type}-${index}`}>
         <small>{index + 1}</small><span className="tile-icon">{cell.icon}</span><b>{cell.label}</b>
-        <div className="tokens">{game.players.filter((item) => item.position === index).map((item) => <i className={item.isBot ? `bot bot-${game.players.indexOf(item)}` : 'human'} title={item.name} key={item.id}><span /></i>)}</div>
+        <div className="tokens">{game.players.filter((item) => (item.isBot ? item.position : visualPosition) === index).map((item) => <i className={item.isBot ? `bot bot-${game.players.indexOf(item)}` : 'human moving-token'} title={item.name} key={item.id}><span /></i>)}</div>
       </div>)}
       <div className="board-center" aria-hidden="true">
         <span>ЦЕЛЬ ИГРЫ</span>
         <strong>ПАССИВНЫЙ<br/>ДОХОД</strong>
-        <i>покрывает расходы</i>
+        <i>покрывает расходы + резерв ×3</i>
         <div className="center-progress"><b style={{ width: `${boardFreedom}%` }} /></div>
         <em>{boardFreedom}%</em>
       </div>
       </div>
     </div>
-    <button className="roll-button" disabled={game.phase !== 'ready'} onClick={onRoll}>
-      <span className={`cube dice-face dice-${game.lastRoll ?? 0}`} aria-hidden="true"><i /><i /><i /><i /><i /><i /></span><b>{game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>{game.phase === 'ready' ? 'Испытай рынок' : 'Заверши событие этого хода'}</small>
+    <button className={`roll-button ${rolling ? 'rolling' : ''}`} disabled={game.phase !== 'ready' || rolling} onClick={onRoll}>
+      <span className={`cube dice-face dice-${game.lastRoll ?? 0}`} aria-hidden="true"><i /><i /><i /><i /><i /><i /></span><b>{rolling ? 'Кубик брошен...' : game.phase === 'ready' ? 'Бросить кубик' : 'Прими решение'}</b><small>{rolling ? 'Фишка движется по полю' : game.phase === 'ready' ? 'Испытай рынок' : 'Заверши событие этого хода'}</small>
     </button>
     <div className="rivals">{competitionStandings(game.players, game.stockMarket).slice(0, 3).map((rival, index) => <div className={rival.id === player.id ? 'you' : rival.status} key={rival.id}><b>{index + 1}</b><span>{rival.name}<small>{rival.status === 'bankrupt' ? 'Выбыл' : `${freedomProgress(rival, game.stockMarket)}% · ${money(netWorth(rival, game.stockMarket))}`}</small></span></div>)}</div>
   </section>
+}
+
+function Tutorial({ onClose }: { onClose: () => void }) {
+  const [step, setStep] = useState(0)
+  const item = tutorialSteps[step]
+  const last = step === tutorialSteps.length - 1
+  return <div className="tutorial-backdrop"><section className="tutorial-card">
+    <button className="tutorial-skip" onClick={onClose}>Пропустить</button>
+    <div className="tutorial-art"><span>{item.icon}</span><i /><i /><i /></div>
+    <span className="eyebrow">{item.eyebrow}</span>
+    <h2>{item.title}</h2><p>{item.text}</p>
+    <div className="tutorial-dots">{tutorialSteps.map((_, index) => <i className={index === step ? 'active' : ''} key={index} />)}</div>
+    <button className="primary-action" onClick={() => last ? onClose() : setStep((value) => value + 1)}>{last ? 'Начать игру' : 'Дальше'} <span>→</span></button>
+  </section></div>
+}
+
+function ConfirmReset({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return <div className="sheet-backdrop"><section className="decision-sheet confirm-sheet"><div className="decision-symbol bad-bg">↻</div><span className="eyebrow">НОВАЯ ПАРТИЯ</span><h2>Начать заново?</h2><p>Текущий прогресс и сохранение этой партии будут удалены.</p><button className="danger-action" onClick={onConfirm}>Да, начать заново</button><button className="ghost-action" onClick={onCancel}>Остаться в игре</button></section></div>
 }
 
 const strategyName = (player: Player) => !player.isBot ? 'Твоя стратегия' : player.botStrategy === 'careful' ? 'Осторожный' : player.botStrategy === 'aggressive' ? 'Агрессивный' : 'Сбалансированный'
@@ -145,7 +222,7 @@ function Race() {
   const standings = competitionStandings(game.players, game.stockMarket)
   return <section className="content-section">
     <div className="section-heading"><span className="eyebrow">КОНКУРЕНЦИЯ</span><h2>Гонка игроков</h2></div>
-    <p className="race-intro">Побеждает тот, кто первым покроет расходы пассивным доходом. Разовый высокий капитал сам по себе свободы не даёт.</p>
+    <p className="race-intro">Побеждает тот, кто первым покроет расходы пассивным доходом и сохранит ликвидный резерв на три месяца. Разовый высокий капитал сам по себе свободы не даёт.</p>
     <div className="race-list">{standings.map((rival, index) => {
       const progress = freedomProgress(rival, game.stockMarket)
       const cashflow = monthlyCashflow(rival, game.stockMarket)
@@ -239,6 +316,7 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const flow = business.revenue - business.operatingCosts - payment
     const downPayment = Math.max(0, decision.askingPrice - business.loan)
     const gap = Math.max(0, downPayment - player.cash)
+    const hasBuyerContribution = player.cash >= downPayment * 0.3
     const projectedOperatingIncome = business.revenue - business.operatingCosts
     const unsecured = assessLoan(player, gap, game.difficulty, undefined, projectedOperatingIncome, payment)
     const collateralOffers = player.assets.map((asset) => ({ asset, offer: assessLoan(player, gap, game.difficulty, asset, projectedOperatingIncome, payment) })).filter(({ offer }) => offer.approved)
@@ -248,10 +326,10 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
       {!decision.negotiated && <div className="negotiation"><div><b>Попробовать торг</b><small>Чем ниже цена, тем выше шанс потерять сделку</small></div><div><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })}>−5%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.9 })}>−10%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.85 })}>−15%</button></div></div>}
       {decision.negotiationNote && <div className="negotiation-note">{decision.negotiationNote}</div>}
       <div className="cash-check"><span>У тебя сейчас</span><strong>{money(player.cash)}</strong></div>
-      {gap > 0 && <div className={`bank-verdict ${unsecured.approved ? 'approved' : 'declined'}`}><div><small>БАНКОВСКАЯ ОЦЕНКА · {unsecured.score}</small><b>{unsecured.approved ? `Одобрено ${money(gap)}` : 'Без залога отказ'}</b></div><span>{unsecured.approved ? `${Math.round(unsecured.annualRate * 100)}% · ${money(unsecured.monthlyPayment)}/мес` : unsecured.reason}</span></div>}
+      {gap > 0 && <div className={`bank-verdict ${unsecured.approved && hasBuyerContribution ? 'approved' : 'declined'}`}><div><small>БАНКОВСКАЯ ОЦЕНКА · {unsecured.score}</small><b>{unsecured.approved && hasBuyerContribution ? `Одобрено ${money(gap)}` : 'Без залога отказ'}</b></div><span>{!hasBuyerContribution ? `Нужно внести своими минимум ${money(Math.ceil(downPayment * .3))}` : unsecured.approved ? `${Math.round(unsecured.annualRate * 100)}% · ${money(unsecured.monthlyPayment)}/мес` : unsecured.reason}</span></div>}
       <button className="primary-action" disabled={gap > 0} onClick={() => buy('cash')}>Купить за свои <span>→</span></button>
       <div className="funding-actions">
-        {gap > 0 && unsecured.approved && <button onClick={() => buy('credit')}><b>Наличными + кредит</b><small>Банк добавит {money(gap)}</small></button>}
+        {gap > 0 && unsecured.approved && hasBuyerContribution && <button onClick={() => buy('credit')}><b>Наличными + кредит</b><small>Банк добавит {money(gap)}</small></button>}
         {gap > 0 && collateralOffers.map(({ asset, offer }) => <button key={asset.id} onClick={() => buy('secured', asset.id)}><b>Заложить {asset.name}</b><small>{money(gap)} · {Math.round(offer.annualRate * 100)}% · {money(offer.monthlyPayment)}/мес</small></button>)}
         <button disabled={player.cash < Math.round(downPayment * .7)} onClick={() => buy('partner30')}><b>Партнёр 30%</b><small>Твой взнос {money(Math.round(downPayment * .7))}</small></button>
         <button disabled={player.cash < Math.round(downPayment * .5)} onClick={() => buy('partner50')}><b>Партнёр 50%</b><small>Твой взнос {money(Math.round(downPayment * .5))}</small></button>

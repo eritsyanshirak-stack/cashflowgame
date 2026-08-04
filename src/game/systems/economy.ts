@@ -29,7 +29,7 @@ export const passiveIncome = (player: Player, market: StockQuote[] = []) =>
   Math.round(player.bonds * 0.014) + monthlyStockDividends(player, market)
 
 export const monthlyExpenses = (player: Player) =>
-  player.baseExpenses + player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
+  player.baseExpenses + Math.round(player.baseDebt * 0.02) + player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
 
 export const monthlyCashflow = (player: Player, market: StockQuote[] = []) =>
   player.salary + passiveIncome(player, market) - monthlyExpenses(player)
@@ -112,8 +112,11 @@ export const netWorth = (player: Player, market: StockQuote[] = []) =>
   player.assets.reduce((sum, asset) => sum + assetMarketValue(asset) - asset.loan, 0) -
   player.baseDebt - player.loans.reduce((sum, loan) => sum + loan.balance, 0)
 
+export const liquidReserve = (player: Player, market: StockQuote[] = []) =>
+  player.cash + player.deposit + player.bonds + stockMarketValue(player, market)
+
 export const isFinanciallyFree = (player: Player, market: StockQuote[] = []) =>
-  passiveIncome(player, market) >= monthlyExpenses(player)
+  passiveIncome(player, market) >= monthlyExpenses(player) && liquidReserve(player, market) >= monthlyExpenses(player) * 3
 
 export const freedomProgress = (player: Player, market: StockQuote[] = []) =>
   Math.max(0, Math.round((passiveIncome(player, market) / Math.max(1, monthlyExpenses(player))) * 100))
@@ -146,8 +149,9 @@ export const createMonthlyReport = (player: Player, month: number, market: Stock
   const bondIncome = Math.round(player.bonds * 0.014)
   const stockDividends = monthlyStockDividends(player, market)
   const loanPayments = player.loans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
+  const baseDebtPayment = Math.round(player.baseDebt * 0.02)
   const netCashflow = player.salary + assetRevenue + depositIncome + bondIncome + stockDividends + resaleReturns -
-    player.baseExpenses - operatingCosts - assetDebtPayments - loanPayments
+    player.baseExpenses - baseDebtPayment - operatingCosts - assetDebtPayments - loanPayments
 
   return {
     month,
@@ -156,7 +160,7 @@ export const createMonthlyReport = (player: Player, month: number, market: Stock
     assetRevenue,
     depositIncome,
     bondIncome, stockDividends, resaleReturns,
-    livingExpenses: player.baseExpenses,
+    livingExpenses: player.baseExpenses + baseDebtPayment,
     operatingCosts,
     assetDebtPayments,
     loanPayments,

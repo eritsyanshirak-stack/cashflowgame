@@ -50,4 +50,4 @@ export const loadGame = (): GameState | null => {
 }
 
 export const clearSave = () => localStorage.removeItem(SAVE_KEY)
-export const hasSave = () => Boolean(localStorage.getItem(SAVE_KEY))
+export const hasSave = () => loadGame() !== null

@@ -149,6 +149,7 @@ const settleMonth = (state: GameState) => {
     if (player.status !== 'active') return
     const report = createMonthlyReport(player, state.month, state.stockMarket, resaleReturns[index])
     player.cash += report.netCashflow
+    player.baseDebt = Math.max(0, player.baseDebt - Math.round(player.baseDebt * 0.014))
   })
   state.players.forEach((player) => {
     if (player.status === 'active') updateAssetMarket(state, player)
@@ -178,6 +179,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
   if (funding === 'cash' && acquisitionGap > 0) return null
   if ((funding === 'partner30' || funding === 'partner50') && acquisitionGap > 0) return null
   if ((funding === 'credit' || funding === 'secured') && acquisitionGap > 0) {
+    if (funding === 'credit' && player.cash < downPayment * 0.3) return null
     const collateral = funding === 'secured' ? player.assets.find((asset) => asset.id === collateralAssetId) : undefined
     if (funding === 'secured' && !collateral) return null
     const projectedIncome = Math.round((business.revenue - business.operatingCosts) * ownership)
@@ -300,8 +302,8 @@ const runBots = (state: GameState) => {
       const payment = Math.round(business.loan * 0.015)
       const profitable = business.revenue - business.operatingCosts - payment > 0
       const reserve = bot.baseExpenses * (strategy === 'careful' ? 1 : strategy === 'aggressive' ? 0.15 : 0.5)
-      if (profitable && bot.cash > business.downPayment * 0.5 + reserve) {
-        const funding: Funding = bot.cash >= business.downPayment + reserve ? 'cash' : strategy === 'aggressive' ? 'credit' : 'partner50'
+      if (profitable && bot.cash > business.downPayment * 0.3 + reserve) {
+        const funding: Funding = bot.cash >= business.downPayment + reserve ? 'cash' : bot.cash >= business.downPayment * 0.5 + reserve ? 'partner50' : 'credit'
         const discount = random(state) < settings.negotiationChance * 0.45 ? 0.92 : 1
         const asset = makeAsset(state, bot, business.id, funding, Math.round(business.price * discount))
         if (asset) {
