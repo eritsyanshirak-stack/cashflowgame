@@ -18,27 +18,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
-      - name: Generate balance v1.2 source
-        id: balance_patch
-        if: github.event_name == 'push'
-        run: |
-          if grep -q "export type BusinessIssue" src/game/domain/types.ts; then
-            echo "applied=false" >> "$GITHUB_OUTPUT"
-            echo "Balance v1.2 is already materialized in source."
-          else
-            python3 scripts/apply_balance_v12_packed.py
-            python3 scripts/apply_balance_v12_fixes.py
-            echo "applied=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Install dependencies
         run: npm ci
@@ -48,16 +33,6 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
-
-      - name: Commit verified balance source
-        if: github.event_name == 'push' && steps.balance_patch.outputs.applied == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f scripts/apply-balance-v12.mjs scripts/apply_balance_v12_packed.py scripts/apply_balance_v12_fixes.py
-          git add -A
-          git commit -m "feat: add realistic risk, due diligence and debt enforcement"
-          git push origin HEAD:balance-v1.1
 
       - name: Upload preview bundle
         uses: actions/upload-artifact@v4
