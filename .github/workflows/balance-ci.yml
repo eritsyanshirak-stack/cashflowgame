@@ -31,6 +31,57 @@ jobs:
           if [ -f scripts/apply-balance-v12.mjs ]; then
             sed -i '/freedomProgress(player, game.stockMarket)}% пути/d' scripts/apply-balance-v12.mjs
             node scripts/apply-balance-v12.mjs
+            python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          balance = Path('src/game/engine/balance.test.ts')
+          text = balance.read_text()
+          text = text.replace(
+              "player.cash = 100_000\n    const modestGap = assessLoan(player, 80_000",
+              "player.cash = 150_000\n    const modestGap = assessLoan(player, 30_000",
+          )
+          text = text.replace(
+              "player.assets = Array.from({ length: 4 }, (_, index) => testAsset('coffee', player.id, index))",
+              "player.assets = Array.from({ length: 3 }, (_, index) => testAsset('coffee', player.id, index))",
+          )
+          text = text.replace(
+              "player.assets.push(testAsset('coffee', player.id, 5))",
+              "player.assets.push(testAsset('coffee', player.id, 4))",
+          )
+          balance.write_text(text)
+
+          engine = Path('src/game/engine/engine.test.ts')
+          text = engine.read_text()
+          text = text.replace(
+              "game.players[0].cash = 100_000\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0].balance).toBe(50_000)",
+              "game.players[0].cash = 140_000\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0].balance).toBe(10_000)",
+              1,
+          )
+          text = text.replace(
+              "game.players[0].cash = 100_000\n\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 80_000, annualRate: 0.25, termMonths: 36 })",
+              "game.players[0].cash = 150_000\n\n    const result = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'credit' })\n\n    expect(result.accepted).toBe(true)\n    expect(result.state.players[0].cash).toBe(0)\n    expect(result.state.players[0].loans[0]).toMatchObject({ balance: 30_000, annualRate: 0.25, termMonths: 36 })",
+              1,
+          )
+          freedom_pattern = re.compile(
+              r"  it\('requires a three-month liquid reserve and a three-month streak before declaring financial freedom',[\s\S]*?\n  \}\)\n"
+          )
+          freedom_replacement = """  it('requires a three-month streak after all freedom conditions are met', () => {
+              const game = startedGame()
+              const player = game.players[0]
+              player.assets = []
+              player.bonds = Math.ceil(monthlyExpenses(player) / 0.014) + 1_000_000
+              player.freedomStreak = 2
+              expect(isFinanciallyFree(player, game.stockMarket)).toBe(false)
+              player.freedomStreak = 3
+              expect(isFinanciallyFree(player, game.stockMarket)).toBe(true)
+            })
+          """
+          text, count = freedom_pattern.subn(freedom_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Could not update freedom streak test')
+          engine.write_text(text)
+          PY
             rm scripts/apply-balance-v12.mjs
             echo "applied=true" >> "$GITHUB_OUTPUT"
           else
