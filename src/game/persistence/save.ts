@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { GameState } from '../domain/types'
 
 const saveSchema = z.object({
-  version: z.literal(9),
+  version: z.literal(10),
   seed: z.number().int().nonnegative(),
   phase: z.enum(['setup', 'ready', 'decision', 'finished']),
   day: z.number().int().min(1).max(30),
@@ -19,6 +19,7 @@ const saveSchema = z.object({
     skills: z.object({ negotiation: z.number().nonnegative(), marketing: z.number().nonnegative(), management: z.number().nonnegative(), finance: z.number().nonnegative(), brand: z.number().nonnegative() }),
     status: z.enum(['active', 'free', 'bankrupt']), eliminatedMonth: z.number().int().positive().nullable(),
     botStrategy: z.enum(['careful', 'balanced', 'aggressive']).optional(), freedomStreak: z.number().int().nonnegative().optional(), restructuringUsed: z.boolean().optional(),
+    specialization: z.enum(['operator', 'negotiator', 'investor', 'entrepreneur']).optional(), jobActive: z.boolean().optional(), rivalIntent: z.string().optional(),
   })).min(1),
   pendingDecision: z.unknown().nullable(),
   events: z.array(z.unknown()),
@@ -35,10 +36,11 @@ const saveSchema = z.object({
   recentCards: z.object({ business: z.array(z.string()), expense: z.array(z.string()), chance: z.array(z.string()), contract: z.array(z.string()), global: z.array(z.string()) }),
   buyerOffers: z.array(z.unknown()),
   activeMarginCall: z.unknown().nullable(),
+  eventChains: z.array(z.unknown()),
   outcome: z.object({ winnerId: z.string().nullable(), reason: z.enum(['freedom', 'human-bankrupt', 'last-solvent']) }).nullable(),
 })
 
-export const SAVE_KEY = 'vyhod-iz-kruga-save-v9-v14'
+export const SAVE_KEY = 'vyhod-iz-kruga-save-v10-v15'
 
 export const saveGame = (state: GameState) => localStorage.setItem(SAVE_KEY, JSON.stringify(state))
 

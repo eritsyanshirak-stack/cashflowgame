@@ -9,6 +9,7 @@ import { hasSave } from './game/persistence/save'
 import { useGameStore } from './store/gameStore'
 import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
 import { AssetSalesCore, BuyerOfferModal, DealFinancingCore, GlobalEventBanner, MarginCallModal, V14DecisionContent } from './V14UI'
+import { DealProfilePanel, EventChainPanel, PortfolioSynergyPanel, RivalIntentPanel, SellerCounterPanel, SpecializationModal } from './V15UI'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
 const TUTORIAL_KEY = 'vyhod-iz-kruga-tutorial-v1'
@@ -138,7 +139,7 @@ function GameScreen() {
     </section>
 
     {tab === 'board' && <Board onRoll={roll} rolling={rollAnimation} />}
-    {tab === 'race' && <Race />}
+    {tab === 'race' && <><Race /><RivalIntentPanel /></>}
     {tab === 'assets' && <Assets />}
     {tab === 'journal' && <Journal />}
 
@@ -146,6 +147,7 @@ function GameScreen() {
     {eventFlash && game.events[0] && <div className={`event-flash ${game.events[0].tone ?? 'neutral'}`}><i>{game.events[0].tone === 'good' ? '+' : game.events[0].tone === 'bad' ? '−' : '•'}</i><span><b>{game.events[0].title}</b><small>{game.events[0].description}</small></span></div>}
     <BuyerOfferModal />
     <MarginCallModal />
+    <SpecializationModal />
     {game.pendingDecision && !rollAnimation && <DecisionSheet decision={game.pendingDecision} dispatch={dispatch} />}
     {report && dismissedReportMonth !== report.month && <MonthlyReportSheet report={report} onClose={() => setDismissedReportMonth(report.month)} />}
     {game.phase === 'finished' && <GameResult game={game} onReset={resetGame} />}
@@ -262,8 +264,11 @@ function Assets() {
       const next = nextSkillXp(player, skillId)
       return <div key={skillId}><span>{definition.icon}</span><b>{definition.name}</b><small>{level}/3{next ? ` · ${player.skills[skillId]}/${next}` : ' · MAX'}</small></div>
     })}</div></div>
+    <PortfolioSynergyPanel />
+    <EventChainPanel />
     {player.assets.length === 0 ? <div className="empty-state"><span>◇</span><h3>Активов пока нет</h3><p>Ищи сделки с положительным потоком. Цена сама по себе ничего не говорит.</p></div> : player.assets.map((asset) => <article className="asset-card asset-card-detailed" key={asset.id}>
       <div className="asset-main"><div className="asset-icon">{asset.icon}</div><div><small>{asset.category} · доля {Math.round(asset.ownership * 100)}% · {asset.riskRating === 'low' ? 'низкий риск' : asset.riskRating === 'medium' ? 'средний риск' : 'высокий риск'}</small><h3>{asset.name}</h3><strong className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес</strong></div></div>
+      {(asset.synergyBonus ?? 0) > 0 && <div className="v15-asset-synergy">Связка портфеля +{Math.round((asset.synergyBonus ?? 0) * 100)}% к выручке · {asset.synergyLabel}</div>}
       <div className={asset.legalIssue ? "pledge-badge" : "negotiation-note"}>{asset.legalIssue ? `⚠ ${asset.legalIssue} · ${asset.issueMonths ?? 0} мес.` : asset.status === 'launching' ? `Запуск: ещё ${asset.launchMonthsRemaining ?? 0} мес.` : asset.status === 'stressed' ? 'Бизнес работает с просадкой' : 'Бизнес работает стабильно'}</div>
       {asset.legalIssue && asset.issueCost && <button className="primary-action" disabled={game.phase !== 'ready' || player.cash < asset.issueCost} onClick={() => dispatch({ type: 'RESOLVE_ASSET_ISSUE', assetId: asset.id })}>Устранить проблему · {money(asset.issueCost)}</button>}
       {pledgedLoanForAsset(player, asset.id) && <div className="pledge-badge">В залоге у банка · остаток {money(pledgedLoanForAsset(player, asset.id)!.balance)}</div>}
@@ -333,10 +338,12 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     body = <>
       {decision.kind === 'business' ? <div className="deal-title"><span>{business.icon}</span><div><small>{business.category} · уровень {business.requiredLevel}</small><h2>{business.name}</h2></div></div> : <><div className="decision-symbol good-bg">★</div><span className="eyebrow">РЕДКАЯ ВОЗМОЖНОСТЬ</span><h2>{decision.title}</h2><p>{decision.description}</p></>}
       <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(Math.max(0, decision.askingPrice - financedLoan))} /><Metric label="Риск" value={business.riskRating === 'low' ? 'Низкий' : business.riskRating === 'medium' ? 'Средний' : 'Высокий'} /><Metric label="Поток после запуска" value={money(flow) + '/мес'} good={flow >= 0} bad={flow < 0} /></div>
+      <DealProfilePanel decision={decision} />
       <div className="bank-verdict"><div><small>ПРОВЕРКА ДОКУМЕНТОВ</small><b>{decision.inspection && decision.inspection !== 'none' ? (decision.issueRevealed ? (decision.hiddenIssue && decision.hiddenIssue !== 'none' ? 'Найдена проблема' : 'Проверка чистая') : 'Результат неоднозначный') : 'Не проводилась'}</b></div><span>{decision.issueRevealed && decision.hiddenIssue && decision.hiddenIssue !== 'none' ? ({ documents: 'Проблемы с документами или лицензией', lease: 'Риск по аренде', repair: 'Скрытый ремонт', 'hidden-debt': 'Скрытый долг' } as const)[decision.hiddenIssue] : 'Без проверки риск скрытых проблем выше'}</span></div>
       {(!decision.inspection || decision.inspection === 'none') && <div className="split-actions two"><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'basic' })}>Базовая проверка</button><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'full' })}>Полная проверка</button></div>}
       {decision.kind === 'business' && !decision.negotiated && <div className="negotiation"><div><b>Попробовать торг</b><small>Чем ниже цена, тем выше шанс потерять сделку</small></div><div><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.95 })}>−5%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.9 })}>−10%</button><button onClick={() => dispatch({ type: 'NEGOTIATE_BUSINESS', offerPercent: 0.85 })}>−15%</button></div></div>}
       {decision.kind === 'business' && decision.negotiationNote && <div className="negotiation-note">{decision.negotiationNote}</div>}
+      <SellerCounterPanel decision={decision} />
       <DealFinancingCore decision={decision} />
       {commonSkip}
     </>

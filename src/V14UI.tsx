@@ -4,6 +4,7 @@ import type { Asset, Decision, Funding, GameCommand } from './game/domain/types'
 import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, loanPayment, pledgedLoanForAsset, totalDebt } from './game/systems/economy'
 import { calculateStockSale } from './game/systems/stockSale'
 import { availableStockCollateral, listingMonthsRemaining, stockFreeQuantity } from './game/systems/v14'
+import { buyerArchetypeLabel } from './game/systems/v15'
 import { useGameStore } from './store/gameStore'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
@@ -172,7 +173,7 @@ export function BuyerOfferModal() {
   const proceeds = assetLiquidationProceeds(player, asset, offer.offeredPrice)
   const difference = offer.offeredPrice / Math.max(1, offer.marketValue) * 100 - 100
   return <div className="sheet-backdrop v14-priority-modal"><section className="decision-sheet v14-offer-modal">
-    <div className="sheet-handle"/><span className="eyebrow">ПОКУПАТЕЛЬ НАШЁЛСЯ</span><h2>{offer.buyerName} предлагает сделку</h2>
+    <div className="sheet-handle"/><span className="eyebrow">ПОКУПАТЕЛЬ НАШЁЛСЯ</span><h2>{offer.buyerName} предлагает сделку</h2>{offer.archetype && <span className="v15-buyer-archetype">{buyerArchetypeLabel[offer.archetype]}</span>}
     <div className="v14-offer-price"><span>{asset.name}<small>Твоя цена {money(offer.askingPrice)} · рынок {money(offer.marketValue)}</small></span><strong>{money(offer.offeredPrice)}<small className={difference >= 0 ? 'good' : 'bad'}>{percent(difference)} к рынку</small></strong></div>
     <div className="v14-summary-grid"><span>Банкам уйдёт <b>{money(Math.min(offer.offeredPrice, asset.loan + (pledgedLoanForAsset(player, asset.id)?.balance ?? 0)))}</b></span><span>Получишь на руки <b className="good">{money(proceeds)}</b></span></div>
     {offer.final && <div className="v14-warning"><b>Это финальная цена покупателя</b><span>Следующий контроффер он уже не рассматривает.</span></div>}

@@ -4,9 +4,11 @@ import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBan
 import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, trainingCost } from '../systems/progression'
 import { createContractOptions, createStockMarginCall, emptyRecentCards, pickFresh, processAssetListings, settleContracts, stockFreeQuantity, updateGlobalEvent } from '../systems/v14'
 import { handleDecisionV14Command, handleReadyV14Command, quickSellAssetForFunding, sellAssetShareForFunding } from './v14Core'
+import { handleDecisionV15Command, handleReadyV15Command } from './v15Core'
+import { applyDealProfileToAsset, createDealProfile, createSellerCounter, negotiationSpecializationBonus, refreshPortfolioSynergies, refreshRivalIntents, resolveEventChains, revealedDealFacts, scheduleDealChain } from '../systems/v15'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 9,
+  version: 10,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -25,6 +27,7 @@ export const emptyGame = (seed = Date.now()): GameState => ({
   recentCards: emptyRecentCards(),
   buyerOffers: [],
   activeMarginCall: null,
+  eventChains: [],
   outcome: null,
 })
 
@@ -81,6 +84,9 @@ const makePlayer = (professionId: string, name: string, isBot: boolean, index: n
     botStrategy: isBot ? botStrategies[(index - 1) % botStrategies.length] : undefined,
     freedomStreak: 0,
     restructuringUsed: false,
+    specialization: undefined,
+    jobActive: true,
+    rivalIntent: isBot ? 'Оценивает рынок и готовит следующий ход' : undefined,
   }
 }
 
@@ -89,9 +95,11 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
   if (type === 'business') {
     const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(player))
     const business = pickFresh(state, 'business', unlocked, (item) => item.id, () => random(state), 4)
+    const profile = createDealProfile(business, () => random(state), uid(state, `profile-${business.id}`))
+    const askingPrice = Math.round(business.price * profile.valueMultiplier / 10_000) * 10_000
     return {
-      kind: 'business', businessId: business.id, askingPrice: business.price, negotiated: false,
-      inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating), issueRevealed: false,
+      kind: 'business', businessId: business.id, askingPrice, originalAskingPrice: askingPrice, negotiated: false,
+      inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating), issueRevealed: false, profile, revealedFacts: [],
     }
   }
   if (type === 'expense') {
@@ -127,10 +135,12 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
     if (availableRareDeals.length > 0 && random(state) < 0.18) {
       const deal = pickFresh(state, 'chance', availableRareDeals, (item) => item.id, () => random(state), 5)
       const business = businesses.find((item) => item.id === deal.businessId)!
+      const profile = createDealProfile(business, () => random(state), uid(state, `profile-${deal.id}`))
+      const askingPrice = Math.round(business.price * deal.discount * profile.valueMultiplier / 10_000) * 10_000
       return {
         kind: 'opportunity', opportunityId: deal.id, businessId: business.id,
-        askingPrice: Math.round(business.price * deal.discount), title: deal.title, description: deal.description,
-        inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating, deal.issueChance * 0.45), issueRevealed: false,
+        askingPrice, originalAskingPrice: askingPrice, title: deal.title, description: deal.description,
+        inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating, deal.issueChance * 0.45), issueRevealed: false, profile, revealedFacts: [],
       }
     }
     const card = pickFresh(state, 'chance', chanceCards, (item) => item[0], () => random(state), 5)
@@ -352,6 +362,7 @@ const settleMonth = (state: GameState) => {
   const resaleReturns = state.players.map((player) => player.status === 'active' ? settleResales(state, player, nextMonth) : 0)
   const contractReturns = state.players.map((player) => player.status === 'active' ? settleContracts(state, player, nextMonth, () => random(state)) : 0)
   state.players.forEach((player) => { if (player.status === 'active') processAssetRisks(state, player) })
+  resolveEventChains(state, nextMonth, () => random(state), (title, description, tone = 'neutral') => addEvent(state, title, description, tone))
   const humanReport = createMonthlyReport(state.players[0], state.month, state.stockMarket, resaleReturns[0], contractReturns[0])
   state.players.forEach((player, index) => {
     if (player.status !== 'active') return
@@ -361,7 +372,10 @@ const settleMonth = (state: GameState) => {
     handleDebtStress(state, player)
   })
   state.players.forEach((player) => {
-    if (player.status === 'active') updateAssetMarket(state, player)
+    if (player.status === 'active') {
+      refreshPortfolioSynergies(player)
+      updateAssetMarket(state, player)
+    }
   })
   updateStockMarket(state)
   state.month = nextMonth
@@ -369,6 +383,7 @@ const settleMonth = (state: GameState) => {
   updateGlobalEvent(state, () => random(state))
   processAssetListings(state, () => random(state))
   state.activeMarginCall = createStockMarginCall(state.players[0], state.stockMarket)
+  refreshRivalIntents(state)
   state.players.forEach((player) => {
     if (player.status !== 'active') return
     player.freedomStreak = meetsFreedomConditions(player, state.stockMarket) ? (player.freedomStreak ?? 0) + 1 : 0
@@ -385,7 +400,7 @@ const advanceCalendar = (state: GameState) => {
   if (state.day >= 30) settleMonth(state)
 }
 
-const makeAsset = (state: GameState, player: Player, businessId: string, funding: Funding, dealPrice?: number, collateralAssetId?: string, diligence: DueDiligence = 'none', hiddenIssue: BusinessIssue = 'none'): Asset | null => {
+const makeAsset = (state: GameState, player: Player, businessId: string, funding: Funding, dealPrice?: number, collateralAssetId?: string, diligence: DueDiligence = 'none', hiddenIssue: BusinessIssue = 'none', profile?: import('../domain/types').DealProfile, sellerTerm?: import('../domain/types').SellerCounter['term']): Asset | null => {
   const business = businesses.find((item) => item.id === businessId)
   if (!business) return null
   const ownership = funding === 'partner30' ? 0.7 : funding === 'partner50' ? 0.5 : 1
@@ -446,7 +461,9 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     listingExpiresMonth: null,
     externalRevenueMultiplier: state.globalEvent?.category === business.category ? state.globalEvent.revenueMultiplier : 1,
   }
+  applyDealProfileToAsset(asset, profile, sellerTerm)
   applyIssueToAsset(asset, hiddenIssue)
+  scheduleDealChain(state, asset)
   return asset
 }
 
@@ -667,11 +684,14 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   state.buyerOffers ??= []
   state.globalEvent ??= null
   state.activeMarginCall ??= null
+  state.eventChains ??= []
   player.activeContracts ??= []
 
   const v14Anytime = command.type === 'RESPOND_BUYER_OFFER' || command.type === 'RESOLVE_MARGIN_CALL'
   const stockPledgeWindow = command.type === 'PLEDGE_STOCK' && (state.phase === 'ready' || state.pendingDecision?.kind === 'market')
   if (state.phase === 'ready' || v14Anytime || stockPledgeWindow) {
+    const v15 = handleReadyV15Command(state, command)
+    if (v15.handled) return v15.accepted ? { state, accepted: true } : reject(current, v15.error ?? 'Операция недоступна')
     const v14 = handleReadyV14Command(state, command, () => random(state))
     if (v14.handled) return v14.accepted ? { state, accepted: true } : reject(current, v14.error ?? 'Операция недоступна')
   }
@@ -766,6 +786,12 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
 
   if (state.phase !== 'decision' || !state.pendingDecision) return reject(current, 'Нет активного решения')
   const decision = state.pendingDecision
+  const v15Decision = handleDecisionV15Command(state, command)
+  if (v15Decision.handled) {
+    if (!v15Decision.accepted) return reject(current, v15Decision.error ?? 'Операция недоступна')
+    if (v15Decision.completeTurn) completeHumanTurn(state)
+    return { state, accepted: true }
+  }
   const v14Decision = handleDecisionV14Command(state, command, () => random(state))
   if (v14Decision.handled) {
     if (!v14Decision.accepted) return reject(current, v14Decision.error ?? 'Операция недоступна')
@@ -778,7 +804,8 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (decision.negotiated) return reject(current, 'Ты уже сделал предложение')
     const settings = difficultySettings[state.difficulty]
     const boldnessPenalty = command.offerPercent === 0.85 ? 0.28 : command.offerPercent === 0.9 ? 0.13 : 0
-    const success = random(state) < settings.negotiationChance + skillLevel(player, 'negotiation') * 0.07 - boldnessPenalty
+    const successChance = settings.negotiationChance + skillLevel(player, 'negotiation') * 0.07 + negotiationSpecializationBonus(player) - boldnessPenalty
+    const success = random(state) < successChance
     decision.negotiated = true
     if (success) {
       decision.askingPrice = Math.round(decision.askingPrice * command.offerPercent)
@@ -787,13 +814,14 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
       awardProgress(state, player, 24, 'negotiation', 14)
       return { state, accepted: true }
     }
-    const dealLost = random(state) < (command.offerPercent === 0.85 ? 0.62 : command.offerPercent === 0.9 ? 0.34 : 0.12)
+    const dealLost = random(state) < (command.offerPercent === 0.85 ? 0.34 : command.offerPercent === 0.9 ? 0.16 : 0.05)
     if (dealLost) {
       addEvent(state, 'Сделка сорвалась', 'Продавец отказался продолжать переговоры.', 'bad')
       completeHumanTurn(state)
     } else {
-      decision.negotiationNote = 'Продавец отказал в скидке, но готов продать по исходной цене.'
-      addEvent(state, 'Скидки не дали', decision.negotiationNote)
+      decision.sellerCounter = createSellerCounter(decision.askingPrice, command.offerPercent, skillLevel(player, 'negotiation'), () => random(state))
+      decision.negotiationNote = 'Продавец сделал встречное предложение: можно принять цену или оставить исходную цену с дополнительным условием.'
+      addEvent(state, 'Контроффер продавца', decision.negotiationNote, 'neutral')
     }
     return { state, accepted: true }
   }
@@ -807,6 +835,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (player.cash < cost) return reject(current, 'Не хватает денег на проверку')
     player.cash -= cost
     decision.inspection = command.level
+    if (decision.profile) decision.revealedFacts = revealedDealFacts(decision.profile, command.level)
     const revealChance = command.level === 'full' ? 1 : Math.min(0.9, 0.64 + skillLevel(player, 'finance') * 0.08)
     decision.issueRevealed = random(state) < revealChance
     const result = decision.issueRevealed
@@ -818,6 +847,24 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   }
 
   if (command.type === 'SKIP_DECISION') {
+    if ((decision.kind === 'business' || decision.kind === 'opportunity') && random(state) < 0.72) {
+      const candidates = state.players.slice(1).filter((bot) => bot.status === 'active')
+      const bot = candidates.sort((a, b) => b.cash - a.cash)[0]
+      const business = businesses.find((item) => item.id === decision.businessId)
+      if (bot && business) {
+        const reserve = bot.baseExpenses * (bot.botStrategy === 'careful' ? 1.2 : 0.45)
+        const downPayment = Math.max(0, decision.askingPrice - Math.min(decision.askingPrice, Math.round(business.loan * (decision.askingPrice / business.price))))
+        if (bot.cash >= downPayment * 0.5 + reserve) {
+          const funding: Funding = bot.cash >= downPayment + reserve ? 'cash' : 'partner50'
+          const rivalAsset = makeAsset(state, bot, decision.businessId, funding, decision.askingPrice, undefined, 'basic', 'none', decision.profile, decision.sellerTerm)
+          if (rivalAsset) {
+            bot.assets.push(rivalAsset)
+            refreshPortfolioSynergies(bot)
+            addEvent(state, 'Соперник перехватил сделку', `${bot.name} купил ${business.name}, от которого ты отказался.`, 'bad')
+          }
+        }
+      }
+    }
     addEvent(state, 'Решение пропущено', 'Ты сохранил деньги и завершил ход.')
     completeHumanTurn(state)
     return { state, accepted: true }
@@ -831,6 +878,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const asset = makeAsset(state, player, decision.businessId, funding, Math.round(business.price * decision.discount), undefined, 'basic', 'none')
     if (!asset) return reject(current, 'Не хватает денег на свою долю')
     player.assets.push(asset)
+    refreshPortfolioSynergies(player)
     awardProgress(state, player, 55, 'negotiation', 12)
     addEvent(state, 'Партнёрство заключено', `${asset.name}: твоя доля ${Math.round(asset.ownership * 100)}%.`, 'good')
     completeHumanTurn(state)
@@ -848,6 +896,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (!asset) return reject(current, command.funding === 'cash' ? 'Даже после продажи выбранных активов денег не хватает' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил итоговую схему финансирования')
 
     player.assets.push(asset)
+    refreshPortfolioSynergies(player)
     if (liquidation.sold.length > 0) {
       const total = liquidation.sold.reduce((sum, item) => sum + item.proceeds, 0)
       addEvent(state, 'Активы проданы для сделки', `${liquidation.sold.map((item) => item.name).join(', ')}. На первый взнос направлено ${total.toLocaleString('ru-RU')} ₽.`, 'neutral')
@@ -869,6 +918,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (!asset) return reject(current, 'Не удалось профинансировать эту возможность выбранной схемой')
 
     player.assets.push(asset)
+    refreshPortfolioSynergies(player)
     if (liquidation.sold.length > 0) {
       const total = liquidation.sold.reduce((sum, item) => sum + item.proceeds, 0)
       addEvent(state, 'Активы проданы для возможности', `${liquidation.sold.map((item) => item.name).join(', ')}. Получено ${total.toLocaleString('ru-RU')} ₽.`, 'neutral')

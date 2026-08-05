@@ -11,7 +11,7 @@ export const assetRevenueMultiplier = (asset: Asset) => {
 }
 
 export const effectiveAssetRevenue = (asset: Asset) =>
-  Math.round(asset.revenue * assetRevenueMultiplier(asset) * (asset.externalRevenueMultiplier ?? 1))
+  Math.round(asset.revenue * assetRevenueMultiplier(asset) * (asset.externalRevenueMultiplier ?? 1) * (1 + (asset.synergyBonus ?? 0)))
 
 export const assetCashflow = (asset: Asset) =>
   effectiveAssetRevenue(asset) - asset.operatingCosts - asset.monthlyPayment
@@ -41,7 +41,7 @@ export const monthlyStockDividends = (player: Player, market: StockQuote[]) =>
   }, 0)
 
 export const portfolioManagementCost = (player: Player) => {
-  const freeCapacity = 3 + skillLevel(player, 'management')
+  const freeCapacity = 3 + skillLevel(player, 'management') + (player.specialization === 'operator' ? 1 : 0)
   const excessBusinesses = Math.max(0, player.assets.length - freeCapacity)
   if (excessBusinesses === 0) return 0
   const grossRevenue = player.assets.reduce((sum, asset) => sum + asset.revenue, 0)

@@ -3,6 +3,7 @@ import type { BuyerOfferAction, GameCommand, GameState, Player } from '../domain
 import { assetCashflow, assetLiquidationProceeds, assetMarketValue, loanPayment, monthlyDebtPayments, pledgedLoanForAsset } from '../systems/economy'
 import { skillLevel } from '../systems/progression'
 import { createStockMarginCall, negotiateBuyerOffer, pledgeStockLoanTerms, pushSystemEvent, stockFreeQuantity } from '../systems/v14'
+import { buyerNegotiationSpecializationBonus, scheduleExpenseChain, stockCollateralRatio } from '../systems/v15'
 
 export interface V14CommandResult {
   handled: boolean
@@ -56,7 +57,7 @@ const respondToBuyer = (state: GameState, offerId: string, action: BuyerOfferAct
   if (offer.final) return rejected('Покупатель уже назвал финальную цену')
   const premium = action === 'counter5' ? 1.05 : action === 'counter10' ? 1.1 : 1.15
   const requestedPrice = Math.round(offer.offeredPrice * premium)
-  const result = negotiateBuyerOffer(offer, requestedPrice, skillLevel(player, 'negotiation'), random)
+  const result = negotiateBuyerOffer(offer, requestedPrice, skillLevel(player, 'negotiation'), random, buyerNegotiationSpecializationBonus(player))
   if (result.kind === 'accepted') {
     sellAssetAtPrice(state, player, asset.id, result.price, 'Покупатель принял контроффер')
     return accepted()
@@ -131,7 +132,7 @@ export const handleReadyV14Command = (state: GameState, command: GameCommand, ra
     if (player.loans.some((loan) => loan.collateralStockId === command.stockId)) return rejected('Этот пакет уже в залоге')
     const free = stockFreeQuantity(holding)
     const quantity = Math.max(1, Math.floor(free * command.percent / 100))
-    const amount = Math.floor(quantity * quote.price * 0.45)
+    const amount = Math.floor(quantity * quote.price * stockCollateralRatio(player))
     if (amount < 5_000) return rejected('Пакет слишком мал для залога')
     const terms = pledgeStockLoanTerms(amount)
     const reliableIncome = Math.max(1, player.salary + player.assets.reduce((sum, asset) => sum + Math.max(0, assetCashflow(asset)), 0))
@@ -197,17 +198,8 @@ export const handleDecisionV14Command = (state: GameState, command: GameCommand,
     if (!option) return rejected('Вариант расхода недоступен')
     if (player.cash < option.amount) return rejected('Недостаточно денег — выбери оплату в кредит')
     player.cash -= option.amount
-    if (option.riskChance && option.riskAmount && random() < option.riskChance) {
-      player.loans.push({
-        id: `expense-risk-${state.month}-${state.day}`,
-        name: `Последствия: ${decision.title}`,
-        balance: option.riskAmount,
-        monthlyPayment: loanPayment(option.riskAmount, 0.34, 18),
-        annualRate: 0.34,
-        termMonths: 18,
-        missedPayments: 0,
-      })
-      pushSystemEvent(state, 'Экономия обернулась долгом', `${decision.title}: последствия ${option.riskAmount.toLocaleString('ru-RU')} ₽.`, 'bad')
+    if (option.riskChance && option.riskAmount && scheduleExpenseChain(state, decision.title, option.riskAmount, option.riskChance, random)) {
+      pushSystemEvent(state, 'Решение отложило риск', `${decision.title}: последствия могут вернуться в одном из следующих месяцев.`, 'neutral')
     } else pushSystemEvent(state, decision.title, `Расход закрыт за ${option.amount.toLocaleString('ru-RU')} ₽.`, 'neutral')
     return accepted(true)
   }

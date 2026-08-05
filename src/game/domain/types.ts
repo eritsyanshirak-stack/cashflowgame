@@ -8,6 +8,41 @@ export type AssetStatus = 'launching' | 'active' | 'stressed' | 'suspended'
 export type DueDiligence = 'none' | 'basic' | 'full'
 export type BusinessIssue = 'none' | 'documents' | 'lease' | 'repair' | 'hidden-debt'
 export type SkillId = 'negotiation' | 'marketing' | 'management' | 'finance' | 'brand'
+export type Specialization = 'operator' | 'negotiator' | 'investor' | 'entrepreneur'
+export type BuyerArchetype = 'urgent' | 'strategic' | 'speculator' | 'management'
+
+export interface DealProfile {
+  id: string
+  location: string
+  leaseMonths: number
+  equipmentCondition: 'poor' | 'fair' | 'good' | 'excellent'
+  equipmentLabel: string
+  ownerDependency: 'low' | 'medium' | 'high'
+  ownerDependencyLabel: string
+  customerRating: number
+  sellerReason: string
+  revenueMultiplier: number
+  costMultiplier: number
+  valueMultiplier: number
+  declaredRevenue: number
+  declaredCosts: number
+}
+
+export interface SellerCounter {
+  price: number
+  term: 'transition' | 'warranty' | 'repairCredit' | 'sellerFinancing'
+  note: string
+}
+
+export interface EventChain {
+  id: string
+  kind: 'deferredExpense' | 'equipment' | 'ownerExit'
+  title: string
+  description: string
+  resolvesMonth: number
+  assetId?: string
+  amount?: number
+}
 
 export type SkillProgress = Record<SkillId, number>
 export type PlayerStatus = 'active' | 'free' | 'bankrupt'
@@ -62,6 +97,11 @@ export interface Asset extends BusinessTemplate {
   listingExpiresMonth?: number | null
   insuredUntilMonth?: number | null
   externalRevenueMultiplier?: number
+  dealProfile?: DealProfile
+  synergyBonus?: number
+  synergyLabel?: string
+  transitionSupportUntilMonth?: number | null
+  warrantyUntilMonth?: number | null
 }
 
 export interface Loan {
@@ -139,6 +179,9 @@ export interface Player {
   botStrategy?: BotStrategy
   freedomStreak?: number
   restructuringUsed?: boolean
+  specialization?: Specialization
+  jobActive?: boolean
+  rivalIntent?: string
 }
 
 export interface GameOutcome {
@@ -188,6 +231,8 @@ export interface BuyerOffer {
   round: 1 | 2
   final: boolean
   expiresMonth: number
+  archetype?: BuyerArchetype
+  buyerPlayerId?: string
 }
 
 export interface MarginCall {
@@ -200,8 +245,8 @@ export interface MarginCall {
 }
 
 export type Decision =
-  | { kind: 'business'; businessId: string; askingPrice: number; negotiated: boolean; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean }
-  | { kind: 'opportunity'; opportunityId: string; businessId: string; askingPrice: number; title: string; description: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean }
+  | { kind: 'business'; businessId: string; askingPrice: number; originalAskingPrice?: number; negotiated: boolean; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean; profile?: DealProfile; revealedFacts?: string[]; sellerCounter?: SellerCounter; sellerTerm?: SellerCounter['term'] }
+  | { kind: 'opportunity'; opportunityId: string; businessId: string; askingPrice: number; originalAskingPrice?: number; title: string; description: string; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean; profile?: DealProfile; revealedFacts?: string[]; sellerCounter?: SellerCounter; sellerTerm?: SellerCounter['term'] }
   | { kind: 'expense'; title: string; amount: number; options?: ExpenseOption[] }
   | { kind: 'chance'; title: string; investment: number; minReturn: number; maxReturn: number; durationMonths: number }
   | { kind: 'contract'; title: string; description: string; options: ContractOption[] }
@@ -249,7 +294,7 @@ export interface RecentCards {
 }
 
 export interface GameState {
-  version: 9
+  version: 10
   seed: number
   phase: Phase
   day: number
@@ -268,6 +313,7 @@ export interface GameState {
   recentCards: RecentCards
   buyerOffers: BuyerOffer[]
   activeMarginCall: MarginCall | null
+  eventChains: EventChain[]
   outcome: GameOutcome | null
 }
 
@@ -278,6 +324,7 @@ export type GameCommand =
   | { type: 'START_GAME'; professionId: string; botCount?: number; difficulty?: Difficulty; seed?: number }
   | { type: 'ROLL_DICE' }
   | { type: 'NEGOTIATE_BUSINESS'; offerPercent: 0.85 | 0.9 | 0.95 }
+  | { type: 'RESPOND_SELLER_COUNTER'; action: 'acceptPrice' | 'acceptTerm' | 'keepOriginal' }
   | { type: 'INSPECT_BUSINESS'; level: 'basic' | 'full' }
   | { type: 'BUY_BUSINESS'; funding: Funding; collateralAssetId?: string; saleAssetIds?: string[] }
   | { type: 'BUY_OPPORTUNITY'; funding: Funding; collateralAssetId?: string; saleAssetIds?: string[] }
@@ -312,6 +359,7 @@ export type GameCommand =
   | { type: 'TAKE_LOAN'; amount: number; collateralAssetId?: string }
   | { type: 'REPAY_LOAN'; amount: number }
   | { type: 'TRAIN'; skillId: SkillId }
+  | { type: 'CHOOSE_SPECIALIZATION'; specialization: Specialization }
 
 export interface CommandResult {
   state: GameState

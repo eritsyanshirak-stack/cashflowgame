@@ -2,6 +2,7 @@ import { contractCards, globalEvents } from '../content/content'
 import type { BuyerOffer, ContractOption, GameEvent, GameState, MarginCall, Player, RecentCards, StockHolding, StockQuote } from '../domain/types'
 import { assetMarketValue, loanPayment } from './economy'
 import { skillLevel } from './progression'
+import { buyerArchetypeLabel, buyerOfferMultiplier, chooseBuyerArchetype, contractSpecializationBonus, stockCollateralRatio } from './v15'
 
 export const emptyRecentCards = (): RecentCards => ({
   business: [],
@@ -38,21 +39,22 @@ export const createContractOptions = (state: GameState, player: Player, random: 
   const card = pickFresh(state, 'contract', contractCards, (item) => item.id, random, 4)
   const level = skillLevel(player, card.skillId)
   const skillBonus = level * 0.06
+  const specialization = contractSpecializationBonus(player)
   const options: ContractOption[] = [
     {
       id: 'safe', title: 'Небольшой безопасный проект',
-      investment: Math.round(card.baseInvestment * 0.55), payout: Math.round(card.basePayout * 0.72),
-      durationMonths: 1, successChance: Math.min(0.98, 0.9 + skillBonus), skillId: card.skillId,
+      investment: Math.round(card.baseInvestment * 0.55), payout: Math.round(card.basePayout * 0.72 * specialization.payout),
+      durationMonths: 1, successChance: Math.min(0.99, 0.9 + skillBonus + specialization.success), skillId: card.skillId,
     },
     {
       id: 'balanced', title: 'Полный контракт',
-      investment: card.baseInvestment, payout: card.basePayout,
-      durationMonths: 1, successChance: Math.min(0.94, 0.72 + skillBonus), skillId: card.skillId,
+      investment: card.baseInvestment, payout: Math.round(card.basePayout * specialization.payout),
+      durationMonths: 1, successChance: Math.min(0.98, 0.72 + skillBonus + specialization.success), skillId: card.skillId,
     },
     {
       id: 'bold', title: 'Расширить объём и команду',
-      investment: Math.round(card.baseInvestment * 1.55), payout: Math.round(card.basePayout * 2.05),
-      durationMonths: 2, successChance: Math.min(0.86, 0.5 + skillBonus), skillId: card.skillId,
+      investment: Math.round(card.baseInvestment * 1.55), payout: Math.round(card.basePayout * 2.05 * specialization.payout),
+      durationMonths: 2, successChance: Math.min(0.94, 0.5 + skillBonus + specialization.success), skillId: card.skillId,
     },
   ]
   return { card, options }
@@ -96,8 +98,6 @@ export const listingResponseChance = (askingPrice: number, marketValue: number) 
   return 0.16
 }
 
-const buyerNames = ['Частный инвестор', 'Предприниматель', 'Конкурент', 'Инвестиционная группа', 'Управляющая компания']
-
 export const processAssetListings = (state: GameState, random: () => number) => {
   const player = state.players[0]
   const activeAssetIds = new Set(player.assets.map((asset) => asset.id))
@@ -120,22 +120,25 @@ export const processAssetListings = (state: GameState, random: () => number) => 
     if (random() >= chance) continue
 
     const ratio = asset.listingPrice / marketValue
+    const archetype = chooseBuyerArchetype(asset, random)
     const fullPriceChance = ratio <= 1 ? 0.7 : ratio <= 1.1 ? 0.38 : ratio <= 1.2 ? 0.17 : 0.05
-    const acceptsAsking = random() < fullPriceChance
-    const bargainFactor = ratio <= 1 ? 0.97 + random() * 0.03 : 0.86 + random() * 0.12
-    const offeredPrice = acceptsAsking
-      ? asset.listingPrice
-      : Math.min(asset.listingPrice, Math.round(marketValue * bargainFactor))
+    const acceptsAsking = random() < fullPriceChance && archetype !== 'speculator'
+    const archetypePrice = Math.round(marketValue * buyerOfferMultiplier(asset, archetype, random))
+    const offeredPrice = acceptsAsking ? asset.listingPrice : Math.min(asset.listingPrice, archetypePrice)
+    const activeBots = state.players.filter((item) => item.isBot && item.status === 'active')
+    const botBuyer = activeBots.length > 0 && random() < 0.28 ? activeBots[Math.floor(random() * activeBots.length)] : undefined
     const offer: BuyerOffer = {
       id: eventId(state, `offer-${asset.id}`),
       assetId: asset.id,
-      buyerName: buyerNames[Math.floor(random() * buyerNames.length)],
+      buyerName: botBuyer?.name ?? buyerArchetypeLabel[archetype],
       askingPrice: asset.listingPrice,
       offeredPrice,
       marketValue,
       round: 1,
       final: false,
       expiresMonth: state.month,
+      archetype,
+      buyerPlayerId: botBuyer?.id,
     }
     state.buyerOffers.push(offer)
     pushSystemEvent(state, 'Покупатель откликнулся', `${asset.name}: предложение ${offeredPrice.toLocaleString('ru-RU')} ₽.`, 'good')
@@ -152,10 +155,11 @@ export const negotiateBuyerOffer = (
   requestedPrice: number,
   negotiationLevel: number,
   random: () => number,
+  specializationBonus = 0,
 ): BuyerNegotiationResult => {
   const requestedPremium = requestedPrice / Math.max(1, offer.marketValue) - 1
   const jump = requestedPrice / Math.max(1, offer.offeredPrice) - 1
-  const acceptanceChance = Math.max(0.07, Math.min(0.88, 0.68 + negotiationLevel * 0.06 - requestedPremium * 1.55 - jump * 1.8))
+  const acceptanceChance = Math.max(0.07, Math.min(0.94, 0.68 + negotiationLevel * 0.06 + specializationBonus - requestedPremium * 1.55 - jump * 1.8))
   if (random() < acceptanceChance) return { kind: 'accepted', price: requestedPrice }
   if (offer.final || random() < 0.42 + Math.max(0, requestedPremium) * 0.35) return { kind: 'walk' }
   const floor = Math.max(offer.offeredPrice, Math.round(offer.marketValue * 0.9))
@@ -171,7 +175,7 @@ export const stockCollateralLoan = (player: Player, stockId: string) =>
 
 export const availableStockCollateral = (player: Player, holding: StockHolding, quote: StockQuote) => {
   if (stockCollateralLoan(player, holding.stockId)) return 0
-  return Math.floor(stockFreeQuantity(holding) * quote.price * 0.45)
+  return Math.floor(stockFreeQuantity(holding) * quote.price * stockCollateralRatio(player))
 }
 
 export const createStockMarginCall = (player: Player, market: StockQuote[]): MarginCall | null => {
