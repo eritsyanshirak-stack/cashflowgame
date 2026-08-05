@@ -1,0 +1,48 @@
+name: Finalize v1.8 live negotiation
+on:
+  push:
+    branches: [balance-v1.8-live-negotiation]
+    paths:
+      - .github/workflows/finalize-v18-live-negotiation.yml
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: balance-v1.8-live-negotiation
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: python scripts/apply_v18_live_negotiation.py
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - name: Save verified build
+        run: |
+          rm -rf /tmp/cashflow-v18-preview
+          mkdir -p /tmp/cashflow-v18-preview
+          cp -R dist/. /tmp/cashflow-v18-preview/
+      - name: Commit verified source
+        run: |
+          rm -f scripts/apply_v18_live_negotiation.py .github/workflows/finalize-v18-live-negotiation.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: make auctions and buyer negotiation unpredictable"
+          git push origin HEAD:balance-v1.8-live-negotiation
+      - name: Publish clean audited preview
+        run: |
+          git checkout --orphan balance-v18-live-preview-static-new
+          git rm -rf . || true
+          git clean -fdx
+          cp -R /tmp/cashflow-v18-preview/. .
+          git add -A
+          git commit -m "preview: audited balance v1.8 live negotiation"
+          git branch -M balance-v18-live-preview-static
+          git push --force origin balance-v18-live-preview-static
