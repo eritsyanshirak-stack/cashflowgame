@@ -271,7 +271,7 @@ const processAssetRisks = (state: GameState, player: Player) => {
       }
       continue
     }
-    if ((asset.insuredUntilMonth ?? 0) >= state.month) continue
+    if ((asset.insuredUntilMonth ?? 0) >= state.month || (asset.warrantyUntilMonth ?? 0) >= state.month) continue
     if ((asset.launchMonthsRemaining ?? 0) > 0 || (asset.incidentCooldown ?? 0) > 0) continue
     const base = asset.riskRating === 'low' ? 0.04 : asset.riskRating === 'medium' ? 0.08 : 0.13
     const diligenceProtection = asset.dueDiligence === 'full' ? 0.48 : asset.dueDiligence === 'basic' ? 0.72 : 1
@@ -463,7 +463,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
   }
   applyDealProfileToAsset(asset, profile, sellerTerm)
   applyIssueToAsset(asset, hiddenIssue)
-  scheduleDealChain(state, asset)
+  if (!player.isBot) scheduleDealChain(state, asset)
   return asset
 }
 

@@ -125,12 +125,10 @@ export const processAssetListings = (state: GameState, random: () => number) => 
     const acceptsAsking = random() < fullPriceChance && archetype !== 'speculator'
     const archetypePrice = Math.round(marketValue * buyerOfferMultiplier(asset, archetype, random))
     const offeredPrice = acceptsAsking ? asset.listingPrice : Math.min(asset.listingPrice, archetypePrice)
-    const activeBots = state.players.filter((item) => item.isBot && item.status === 'active')
-    const botBuyer = activeBots.length > 0 && random() < 0.28 ? activeBots[Math.floor(random() * activeBots.length)] : undefined
     const offer: BuyerOffer = {
       id: eventId(state, `offer-${asset.id}`),
       assetId: asset.id,
-      buyerName: botBuyer?.name ?? buyerArchetypeLabel[archetype],
+      buyerName: buyerArchetypeLabel[archetype],
       askingPrice: asset.listingPrice,
       offeredPrice,
       marketValue,
@@ -138,7 +136,6 @@ export const processAssetListings = (state: GameState, random: () => number) => 
       final: false,
       expiresMonth: state.month,
       archetype,
-      buyerPlayerId: botBuyer?.id,
     }
     state.buyerOffers.push(offer)
     pushSystemEvent(state, 'Покупатель откликнулся', `${asset.name}: предложение ${offeredPrice.toLocaleString('ru-RU')} ₽.`, 'good')
