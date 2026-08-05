@@ -102,6 +102,8 @@ export interface Asset extends BusinessTemplate {
   synergyLabel?: string
   transitionSupportUntilMonth?: number | null
   warrantyUntilMonth?: number | null
+  purchaseCashContribution?: number
+  cashInvested?: number
 }
 
 export interface Loan {
@@ -114,6 +116,7 @@ export interface Loan {
   collateralAssetId?: string
   collateralStockId?: string
   collateralStockQuantity?: number
+  relatedAssetId?: string
   missedPayments?: number
 }
 
@@ -131,6 +134,10 @@ export interface StockHolding {
   stockId: string
   quantity: number
   averagePrice: number
+  averageMarketPrice?: number
+  costBasis?: number
+  marketCostBasis?: number
+  purchaseFees?: number
   pledgedQuantity?: number
 }
 
@@ -251,7 +258,7 @@ export type Decision =
   | { kind: 'chance'; title: string; investment: number; minReturn: number; maxReturn: number; durationMonths: number }
   | { kind: 'contract'; title: string; description: string; options: ContractOption[] }
   | { kind: 'auction'; businessId: string; title: string; currentBid: number; marketValue: number; minimumStep: number; inspected: boolean; issue?: BusinessIssue; issueRevealed?: boolean; botCeilings: number[]; leadingBot: number | null }
-  | { kind: 'partnership'; businessId: string; title: string; description: string; discount: number }
+  | { kind: 'partnership'; businessId: string; title: string; description: string; discount: number; originalDiscount: number; partnerName: string; negotiated?: boolean; negotiationSucceeded?: boolean; negotiationNote?: string }
   | { kind: 'management' }
   | { kind: 'market'; title: string; description: string }
   | { kind: 'bank' }
@@ -294,7 +301,7 @@ export interface RecentCards {
 }
 
 export interface GameState {
-  version: 10
+  version: 11
   seed: number
   phase: Phase
   day: number
@@ -346,6 +353,7 @@ export type GameCommand =
   | { type: 'AUCTION_INSPECT' }
   | { type: 'AUCTION_BID'; amount: number }
   | { type: 'AUCTION_WITHDRAW' }
+  | { type: 'NEGOTIATE_PARTNERSHIP'; request: 'small' | 'bold' }
   | { type: 'ACCEPT_PARTNERSHIP'; ownership: 0.3 | 0.5 }
   | { type: 'MANAGEMENT_ACTION'; action: 'refinance' | 'insure'; assetId?: string }
   | { type: 'DEPOSIT'; amount: number }

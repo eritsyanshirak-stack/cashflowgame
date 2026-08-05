@@ -6,9 +6,11 @@ import { createContractOptions, createStockMarginCall, emptyRecentCards, pickFre
 import { handleDecisionV14Command, handleReadyV14Command, quickSellAssetForFunding, sellAssetShareForFunding } from './v14Core'
 import { handleDecisionV15Command, handleReadyV15Command } from './v15Core'
 import { applyDealProfileToAsset, createDealProfile, createSellerCounter, dealProjectedOperatingIncome, negotiationSpecializationBonus, refreshPortfolioSynergies, refreshRivalIntents, resolveEventChains, revealedDealFacts, scheduleDealChain } from '../systems/v15'
+import { STOCK_COMMISSION_RATE, stockPurchaseTotal, stockSaleProceeds } from '../systems/stockSale'
+import { assetInvestmentBasis, calculatePartnershipTerms, reduceAssetInvestmentBasis } from '../systems/v16'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 10,
+  version: 11,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -127,7 +129,13 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
   if (type === 'partnership') {
     const unlocked = businesses.filter((item) => item.requiredLevel <= playerLevel(player))
     const business = pickFresh(state, 'business', unlocked, (item) => item.id, () => random(state), 4)
-    return { kind: 'partnership', businessId: business.id, title: business.name, description: 'Владелец ищет партнёра и готов продать долю с небольшой скидкой.', discount: 0.9 }
+    const partnerPool = state.players.slice(1).filter((item) => item.status === 'active')
+    const partnerName = partnerPool.length ? pick(state, partnerPool).name : pick(state, ['Ирина', 'Максим', 'Олег'])
+    return {
+      kind: 'partnership', businessId: business.id, title: business.name,
+      description: `${partnerName} нашёл объект и предлагает разделить первый взнос, кредит и будущий доход.`,
+      discount: 0.9, originalDiscount: 0.9, partnerName, negotiated: false,
+    }
   }
   if (type === 'management') return { kind: 'management' }
   if (type === 'chance') {
@@ -404,9 +412,11 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
   const business = businesses.find((item) => item.id === businessId)
   if (!business) return null
   const ownership = funding === 'partner30' ? 0.7 : funding === 'partner50' ? 0.5 : 1
+  const assetId = uid(state, business.id)
   const purchasePrice = dealPrice ?? business.price
   const financedLoan = Math.min(purchasePrice, Math.round(business.loan * (purchasePrice / business.price)))
   const downPayment = Math.round(Math.max(0, purchasePrice - financedLoan) * ownership)
+  const purchaseCashContribution = Math.min(player.cash, downPayment)
   const acquisitionGap = Math.max(0, downPayment - player.cash)
   if (funding === 'cash' && acquisitionGap > 0) return null
   if ((funding === 'partner30' || funding === 'partner50') && acquisitionGap > 0) return null
@@ -427,6 +437,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
       annualRate: assessment.annualRate,
       termMonths: assessment.termMonths,
       collateralAssetId: collateral?.id,
+      relatedAssetId: assetId,
       missedPayments: 0,
     })
     player.cash += acquisitionGap
@@ -434,7 +445,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
   player.cash -= downPayment
   const asset: Asset = {
     ...business,
-    id: uid(state, business.id),
+    id: assetId,
     ownerId: player.id,
     ownership,
     price: purchasePrice,
@@ -460,6 +471,8 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     listingStartedMonth: null,
     listingExpiresMonth: null,
     externalRevenueMultiplier: state.globalEvent?.category === business.category ? state.globalEvent.revenueMultiplier : 1,
+    purchaseCashContribution,
+    cashInvested: purchaseCashContribution,
   }
   applyDealProfileToAsset(asset, profile, sellerTerm)
   applyIssueToAsset(asset, hiddenIssue)
@@ -477,6 +490,7 @@ const applyDevelopment = (asset: Asset, developmentId: string, cost: number, mar
   asset.developments.push(development.id)
   asset.developmentLevel += 1
   asset.totalDevelopmentCost += cost
+  asset.cashInvested = assetInvestmentBasis(asset) + cost
   return true
 }
 
@@ -586,14 +600,22 @@ const runBots = (state: GameState) => {
       const quotes = [...state.stockMarket].sort((a, b) => strategy === 'careful' ? b.dividendYield - a.dividendYield : (b.price / b.previousPrice) - (a.price / a.previousPrice))
       const quote = quotes[0]
       const reserve = bot.baseExpenses * (strategy === 'careful' ? 1 : 0.35)
-      const buyPrice = Math.ceil(quote.price * 1.015)
+      const buyPrice = stockPurchaseTotal(quote.price, 1)
       if (bot.cash >= buyPrice + reserve) {
         bot.cash -= buyPrice
         const holding = bot.stocks.find((item) => item.stockId === quote.id)
         if (holding) {
-          holding.averagePrice = Math.round((holding.averagePrice * holding.quantity + buyPrice) / (holding.quantity + 1))
-          holding.quantity += 1
-        } else bot.stocks.push({ stockId: quote.id, quantity: 1, averagePrice: buyPrice })
+          const oldQuantity = holding.quantity
+          const oldCostBasis = holding.costBasis ?? holding.averagePrice * oldQuantity
+          const oldMarketCostBasis = holding.marketCostBasis ?? (holding.averageMarketPrice ?? Math.round(holding.averagePrice / (1 + STOCK_COMMISSION_RATE))) * oldQuantity
+          const newQuantity = oldQuantity + 1
+          holding.costBasis = oldCostBasis + buyPrice
+          holding.marketCostBasis = oldMarketCostBasis + quote.price
+          holding.averagePrice = Math.round(holding.costBasis / newQuantity)
+          holding.averageMarketPrice = Math.round(holding.marketCostBasis / newQuantity)
+          holding.purchaseFees = holding.costBasis - holding.marketCostBasis
+          holding.quantity = newQuantity
+        } else bot.stocks.push({ stockId: quote.id, quantity: 1, averagePrice: buyPrice, averageMarketPrice: quote.price, costBasis: buyPrice, marketCostBasis: quote.price, purchaseFees: buyPrice - quote.price })
       }
     }
     if (cell.type === 'contract' && random(state) < settings.botActivity * 0.72) {
@@ -703,6 +725,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (!asset || !asset.legalIssue || !asset.issueCost) return reject(current, 'У этого актива нет проблемы, требующей оплаты')
     if (player.cash < asset.issueCost) return reject(current, 'Не хватает денег на устранение проблемы')
     player.cash -= asset.issueCost
+    asset.cashInvested = assetInvestmentBasis(asset) + asset.issueCost
     addEvent(state, 'Проблема устранена', `${asset.name}: ${asset.legalIssue}. Потрачено ${asset.issueCost.toLocaleString('ru-RU')} ₽.`, 'good')
     asset.legalIssue = undefined
     asset.issueCost = undefined
@@ -740,7 +763,10 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const newOwnership = command.type === 'BUY_PARTNER_SHARE' ? oldOwnership + delta : oldOwnership - delta
     const ratio = newOwnership / oldOwnership
     const oldMarketValue = assetMarketValue(asset)
+    const soldRatio = command.type === 'SELL_PARTNER_SHARE' ? delta / oldOwnership : 0
     player.cash += command.type === 'BUY_PARTNER_SHARE' ? -sharePrice : sharePrice
+    if (command.type === 'BUY_PARTNER_SHARE') asset.cashInvested = assetInvestmentBasis(asset) + sharePrice
+    else reduceAssetInvestmentBasis(asset, soldRatio)
     asset.ownership = Math.round(newOwnership * 100) / 100
     asset.revenue = Math.round(asset.revenue * ratio)
     asset.operatingCosts = Math.round(asset.operatingCosts * ratio)
@@ -756,10 +782,13 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const assetIndex = player.assets.findIndex((asset) => asset.id === command.assetId)
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
+    const invested = assetInvestmentBasis(asset)
+    const relatedDebt = player.loans.filter((loan) => loan.relatedAssetId === asset.id).reduce((sum, loan) => sum + loan.balance, 0)
     const marketValue = assetMarketValue(asset)
     const quickPrice = Math.round(marketValue * 0.93)
     const { proceeds, bankPayment, deficiency } = sellAsset(player, asset, quickPrice)
-    addEvent(state, 'Актив продан срочно', `${asset.name}: рынок ${marketValue.toLocaleString('ru-RU')} ₽, цена быстрой продажи ${quickPrice.toLocaleString('ru-RU')} ₽, банку ${bankPayment.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, proceeds >= asset.downPayment ? 'good' : deficiency > 0 ? 'bad' : 'neutral')
+    const result = proceeds - invested - relatedDebt
+    addEvent(state, 'Актив продан срочно', `${asset.name}: рынок ${marketValue.toLocaleString('ru-RU')} ₽, цена быстрой продажи ${quickPrice.toLocaleString('ru-RU')} ₽, банку ${bankPayment.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽, результат к своим вложениям ${result >= 0 ? '+' : ''}${result.toLocaleString('ru-RU')} ₽${relatedDebt > 0 ? `, отдельный кредит на взнос остался ${relatedDebt.toLocaleString('ru-RU')} ₽` : ''}${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, result >= 0 ? 'good' : 'bad')
     return { state, accepted: true }
   }
 
@@ -769,8 +798,11 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
     if (!asset.saleOffer || asset.offerExpiresMonth !== state.month) return reject(current, 'Предложение уже недоступно')
+    const invested = assetInvestmentBasis(asset)
+    const relatedDebt = player.loans.filter((loan) => loan.relatedAssetId === asset.id).reduce((sum, loan) => sum + loan.balance, 0)
     const { proceeds } = sellAsset(player, asset, asset.saleOffer)
-    addEvent(state, 'Предложение принято', `${asset.name}: на руки ${proceeds.toLocaleString('ru-RU')} ₽`, 'good')
+    const result = proceeds - invested - relatedDebt
+    addEvent(state, 'Предложение принято', `${asset.name}: на руки ${proceeds.toLocaleString('ru-RU')} ₽, результат к своим вложениям ${result >= 0 ? '+' : ''}${result.toLocaleString('ru-RU')} ₽${relatedDebt > 0 ? `, кредит на взнос остался ${relatedDebt.toLocaleString('ru-RU')} ₽` : ''}`, result >= 0 ? 'good' : 'bad')
     return { state, accepted: true }
   }
 
@@ -870,17 +902,40 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     return { state, accepted: true }
   }
 
+  if (command.type === 'NEGOTIATE_PARTNERSHIP') {
+    if (decision.kind !== 'partnership') return reject(current, 'Сейчас нет предложения партнёра')
+    if (decision.negotiated) return reject(current, 'Условия уже обсуждались')
+    const settings = difficultySettings[state.difficulty]
+    const improvement = command.request === 'small' ? 0.03 : 0.06
+    const penalty = command.request === 'small' ? 0.04 : 0.22
+    const chance = settings.negotiationChance + skillLevel(player, 'negotiation') * 0.08 + negotiationSpecializationBonus(player) - penalty
+    decision.negotiated = true
+    decision.negotiationSucceeded = random(state) < chance
+    if (decision.negotiationSucceeded) {
+      decision.discount = Math.max(0.78, Math.round((decision.discount - improvement) * 100) / 100)
+      decision.negotiationNote = `${decision.partnerName} договорился снизить цену ещё на ${Math.round(improvement * 100)}%. Новая скидка — ${Math.round((1 - decision.discount) * 100)}%.`
+      awardProgress(state, player, 18, 'negotiation', 10)
+      addEvent(state, 'Партнёр улучшил условия', decision.negotiationNote, 'good')
+    } else {
+      decision.discount = decision.originalDiscount
+      decision.negotiationNote = `${decision.partnerName} не смог улучшить цену. Исходное предложение осталось доступно.`
+      addEvent(state, 'Условия партнёрства без изменений', decision.negotiationNote, 'neutral')
+    }
+    return { state, accepted: true }
+  }
+
   if (command.type === 'ACCEPT_PARTNERSHIP') {
     if (decision.kind !== 'partnership') return reject(current, 'Сейчас нет предложения партнёра')
     const funding: Funding = command.ownership === 0.3 ? 'partner30' : 'partner50'
     const business = businesses.find((item) => item.id === decision.businessId)
     if (!business) return reject(current, 'Бизнес не найден')
-    const asset = makeAsset(state, player, decision.businessId, funding, Math.round(business.price * decision.discount), undefined, 'basic', 'none')
-    if (!asset) return reject(current, 'Не хватает денег на свою долю')
+    const terms = calculatePartnershipTerms(business, decision.discount, command.ownership)
+    const asset = makeAsset(state, player, decision.businessId, funding, terms.dealPrice, undefined, 'basic', 'none')
+    if (!asset) return reject(current, `Для входа нужно ${terms.playerCashNeeded.toLocaleString('ru-RU')} ₽, на счёте недостаточно`)
     player.assets.push(asset)
     refreshPortfolioSynergies(player)
     awardProgress(state, player, 55, 'negotiation', 12)
-    addEvent(state, 'Партнёрство заключено', `${asset.name}: твоя доля ${Math.round(asset.ownership * 100)}%.`, 'good')
+    addEvent(state, 'Партнёрство заключено', `${decision.partnerName} вложил ${terms.partnerCashContribution.toLocaleString('ru-RU')} ₽. Ты вложил ${terms.playerCashNeeded.toLocaleString('ru-RU')} ₽ и получил ${Math.round(asset.ownership * 100)}% ${asset.name}.`, 'good')
     completeHumanTurn(state)
     return { state, accepted: true }
   }
@@ -985,7 +1040,9 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
         if (!quickSellAssetForFunding(state, player, assetId)) return reject(current, 'Выбранный бизнес уже недоступен')
       }
       if (command.shareSaleAssetId && command.shareSalePercent && !sellAssetShareForFunding(state, player, command.shareSaleAssetId, command.shareSalePercent)) return reject(current, 'Не удалось продать выбранную долю')
-      const total = Math.ceil(quote.price * command.quantity * 1.015)
+      const grossPurchase = quote.price * command.quantity
+      const total = stockPurchaseTotal(quote.price, command.quantity)
+      const purchaseFee = total - grossPurchase
       const funding = command.funding ?? 'cash'
       const gap = Math.max(0, total - player.cash)
       if (gap > 0 && funding === 'cash') return reject(current, 'Не хватает денег на покупку акций')
@@ -1001,19 +1058,47 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
       player.cash -= total
       holding = player.stocks.find((item) => item.stockId === quote.id)
       if (holding) {
-        holding.averagePrice = Math.round((holding.averagePrice * holding.quantity + total) / (holding.quantity + command.quantity))
-        holding.quantity += command.quantity
-      } else player.stocks.push({ stockId: quote.id, quantity: command.quantity, averagePrice: Math.round(total / command.quantity), pledgedQuantity: 0 })
+        const oldQuantity = holding.quantity
+        const oldCostBasis = holding.costBasis ?? holding.averagePrice * oldQuantity
+        const oldMarketCostBasis = holding.marketCostBasis ?? (holding.averageMarketPrice ?? Math.round(holding.averagePrice / (1 + STOCK_COMMISSION_RATE))) * oldQuantity
+        const newQuantity = oldQuantity + command.quantity
+        holding.costBasis = oldCostBasis + total
+        holding.marketCostBasis = oldMarketCostBasis + grossPurchase
+        holding.averagePrice = Math.round(holding.costBasis / newQuantity)
+        holding.averageMarketPrice = Math.round(holding.marketCostBasis / newQuantity)
+        holding.purchaseFees = holding.costBasis - holding.marketCostBasis
+        holding.quantity = newQuantity
+      } else player.stocks.push({
+        stockId: quote.id,
+        quantity: command.quantity,
+        averagePrice: Math.round(total / command.quantity),
+        averageMarketPrice: quote.price,
+        costBasis: total,
+        marketCostBasis: grossPurchase,
+        purchaseFees: purchaseFee,
+        pledgedQuantity: 0,
+      })
       addEvent(state, 'Акции куплены', `${quote.ticker}: ${command.quantity} шт. за ${total.toLocaleString('ru-RU')} ₽`)
     } else {
       const freeQuantity = holding ? stockFreeQuantity(holding) : 0
       if (!holding || freeQuantity < command.quantity) return reject(current, 'Столько свободных от залога акций нет')
-      const proceeds = Math.floor(quote.price * command.quantity * 0.985)
-      const costBasis = holding.averagePrice * command.quantity
+      const proceeds = stockSaleProceeds(quote.price, command.quantity)
+      const quantityBeforeSale = holding.quantity
+      const totalCostBasis = holding.costBasis ?? holding.averagePrice * quantityBeforeSale
+      const totalMarketCostBasis = holding.marketCostBasis ?? (holding.averageMarketPrice ?? Math.round(holding.averagePrice / (1 + STOCK_COMMISSION_RATE))) * quantityBeforeSale
+      const soldCostBasis = Math.round(totalCostBasis * command.quantity / quantityBeforeSale)
+      const soldMarketCostBasis = Math.round(totalMarketCostBasis * command.quantity / quantityBeforeSale)
       player.cash += proceeds
       holding.quantity -= command.quantity
+      holding.costBasis = Math.max(0, totalCostBasis - soldCostBasis)
+      holding.marketCostBasis = Math.max(0, totalMarketCostBasis - soldMarketCostBasis)
+      holding.purchaseFees = Math.max(0, holding.costBasis - holding.marketCostBasis)
       if (holding.quantity === 0) player.stocks = player.stocks.filter((item) => item.stockId !== quote.id)
-      addEvent(state, 'Акции проданы', `${quote.ticker}: ${command.quantity} шт., получено ${proceeds.toLocaleString('ru-RU')} ₽, результат ${(proceeds - costBasis).toLocaleString('ru-RU')} ₽`, proceeds >= costBasis ? 'good' : 'bad')
+      else {
+        holding.averagePrice = Math.round(holding.costBasis / holding.quantity)
+        holding.averageMarketPrice = Math.round(holding.marketCostBasis / holding.quantity)
+      }
+      addEvent(state, 'Акции проданы', `${quote.ticker}: ${command.quantity} шт., получено ${proceeds.toLocaleString('ru-RU')} ₽, результат ${(proceeds - soldCostBasis).toLocaleString('ru-RU')} ₽`, proceeds >= soldCostBasis ? 'good' : 'bad')
     }
     return { state, accepted: true }
   }

@@ -10,6 +10,8 @@ import { useGameStore } from './store/gameStore'
 import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
 import { AssetSalesCore, BuyerOfferModal, DealFinancingCore, GlobalEventBanner, MarginCallModal, V14DecisionContent } from './V14UI'
 import { DealProfilePanel, EventChainPanel, PortfolioSynergyPanel, RivalIntentPanel, SellerCounterPanel, SpecializationModal } from './V15UI'
+import { AssetInvestmentPanel } from './V16UI'
+import { calculateStockSale, STOCK_COMMISSION_RATE } from './game/systems/stockSale'
 import { dealProjectedOperatingIncome } from './game/systems/v15'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
@@ -274,12 +276,13 @@ function Assets() {
       {asset.legalIssue && asset.issueCost && <button className="primary-action" disabled={game.phase !== 'ready' || player.cash < asset.issueCost} onClick={() => dispatch({ type: 'RESOLVE_ASSET_ISSUE', assetId: asset.id })}>Устранить проблему · {money(asset.issueCost)}</button>}
       {pledgedLoanForAsset(player, asset.id) && <div className="pledge-badge">В залоге у банка · остаток {money(pledgedLoanForAsset(player, asset.id)!.balance)}</div>}
       <div className="asset-facts"><span>Рыночная стоимость <b>{money(assetMarketValue(asset))}</b></span><span>Долг самого бизнеса <b>{money(asset.loan)}</b></span><span>Уровень развития <b>{asset.developmentLevel}/4</b></span><span>Получишь после банков <b>{money(assetLiquidationProceeds(player, asset))}</b></span></div>
+      <AssetInvestmentPanel player={player} asset={asset} />
       {asset.saleOffer && asset.offerExpiresMonth === game.month && <div className="sale-offer"><div><small>ПРЕДЛОЖЕНИЕ ДО КОНЦА МЕСЯЦА</small><strong>{money(asset.saleOffer)}</strong></div><button disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'ACCEPT_SALE_OFFER', assetId: asset.id })}>Принять</button></div>}
       <div className="development-list">{developments.filter((item) => !asset.developments.includes(item.id)).map((item) => {
         const cost = developmentCost(player, asset, item.costRate)
         return <button key={item.id} disabled={game.phase !== 'ready' || asset.lastDevelopedMonth === game.month || player.cash < cost} onClick={() => dispatch({ type: 'DEVELOP_ASSET', assetId: asset.id, developmentId: item.id })}><span><b>{item.name}</b><small>{item.description}</small></span><strong>{money(cost)}</strong></button>
       })}</div>
-      <div className="partner-actions"><span>{asset.ownership < 1 ? `Партнёр владеет ${Math.round((1 - asset.ownership) * 100)}%` : 'Ты единственный владелец'}</span><button disabled={game.phase !== 'ready' || asset.ownership >= 1} onClick={() => dispatch({ type: 'BUY_PARTNER_SHARE', assetId: asset.id })}>Выкупить 10%</button><button disabled={game.phase !== 'ready' || asset.ownership <= 0.5} onClick={() => dispatch({ type: 'SELL_PARTNER_SHARE', assetId: asset.id })}>Продать 10%</button></div>
+      <div className="partner-actions"><span>{asset.ownership < 1 ? `Партнёр владеет ${Math.round((1 - asset.ownership) * 100)}%` : 'Ты единственный владелец'}</span><button disabled={game.phase !== 'ready' || asset.ownership >= 1} onClick={() => dispatch({ type: 'BUY_PARTNER_SHARE', assetId: asset.id })}>Выкупить 10% · {money(Math.round((assetMarketValue(asset) / asset.ownership) * 0.1 * 1.08))}</button><button disabled={game.phase !== 'ready' || asset.ownership <= 0.5} onClick={() => dispatch({ type: 'SELL_PARTNER_SHARE', assetId: asset.id })}>Продать 10% · {money(Math.round((assetMarketValue(asset) / asset.ownership) * 0.1 * 0.96))}</button></div>
       <button className="sell-button" disabled={game.phase !== 'ready'} onClick={() => dispatch({ type: 'SELL_ASSET', assetId: asset.id })}>Продать срочно · 93% рынка</button>
     </article>)}
     <AssetSalesCore />
@@ -288,9 +291,10 @@ function Assets() {
       <div className="portfolio-heading"><span><small>БИРЖЕВОЙ ПОРТФЕЛЬ</small><b>{money(stockMarketValue(player, game.stockMarket))}</b></span><strong className="good">+{money(monthlyStockDividends(player, game.stockMarket))}/мес</strong></div>
       {player.stocks.length === 0 ? <p>Акций пока нет. Купить их можно на клетке "Рынок".</p> : player.stocks.map((holding) => {
         const quote = game.stockMarket.find((item) => item.id === holding.stockId)!
-        const value = quote.price * holding.quantity
-        const profit = value - holding.averagePrice * holding.quantity
-        return <div className="holding-row" key={holding.stockId}><span><b>{quote.ticker} · {holding.quantity} шт.</b><small>{quote.name} · средняя {money(holding.averagePrice)} · свободно {Math.max(0, holding.quantity - (holding.pledgedQuantity ?? 0))} · заложено {holding.pledgedQuantity ?? 0}</small></span><strong className={profit >= 0 ? 'good' : 'bad'}>{profit >= 0 ? '+' : ''}{money(profit)}<small>{money(value)}</small></strong></div>
+        const exactCostBasis = holding.costBasis ?? holding.averagePrice * holding.quantity
+        const result = calculateStockSale(holding.averagePrice, quote.price, holding.quantity, STOCK_COMMISSION_RATE, exactCostBasis)
+        const entryMarketPrice = holding.averageMarketPrice ?? Math.round((holding.marketCostBasis ?? exactCostBasis / (1 + STOCK_COMMISSION_RATE)) / holding.quantity)
+        return <div className="holding-row v16-holding-row" key={holding.stockId}><span><b>{quote.ticker} · {holding.quantity} шт.</b><small>{quote.name} · вход {money(entryMarketPrice)} · себестоимость {money(holding.averagePrice)} · безубыток {money(result.breakEvenPrice)}</small><small>Текущая стоимость {money(result.grossValue)} · комиссия продажи {money(result.commission)} · на руки {money(result.proceeds)}</small></span><strong className={result.profit >= 0 ? 'good' : 'bad'}>{result.profit >= 0 ? '+' : ''}{money(result.profit)}<small>{result.profitPercent >= 0 ? '+' : ''}{result.profitPercent.toFixed(1)}% после комиссии</small></strong></div>
       })}
     </div>
     {player.resaleDeals.length > 0 && <div className="portfolio-section"><div className="portfolio-heading"><span><small>ТОВАРЫ НА ПЕРЕПРОДАЖЕ</small><b>{player.resaleDeals.length} активных</b></span></div>{player.resaleDeals.map((deal) => <div className="holding-row" key={deal.id}><span><b>{deal.title}</b><small>Вложено {money(deal.investment)} · результат в месяце {deal.resolvesMonth}</small></span><strong>{deal.delays ? 'Задержка' : 'В работе'}<small>ожидание {money(deal.expectedMin)} - {money(deal.expectedMax)}</small></strong></div>)}</div>}

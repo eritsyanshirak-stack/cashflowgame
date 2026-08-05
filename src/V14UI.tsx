@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { businesses } from './game/content/content'
 import type { Asset, Decision, Funding, GameCommand } from './game/domain/types'
 import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, loanPayment, pledgedLoanForAsset, totalDebt } from './game/systems/economy'
-import { calculateStockSale } from './game/systems/stockSale'
+import { calculateStockSale, STOCK_COMMISSION_RATE, stockPurchaseTotal } from './game/systems/stockSale'
 import { availableStockCollateral, listingMonthsRemaining, stockFreeQuantity } from './game/systems/v14'
 import { buyerArchetypeLabel, dealProjectedOperatingIncome } from './game/systems/v15'
 import { useGameStore } from './store/gameStore'
+import { PartnershipDecision } from './V16UI'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
 const percent = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
@@ -208,7 +209,9 @@ function StockFinancePanel({ stockId, onClose }: { stockId: string; onClose: () 
   const [shareAssetId, setShareAssetId] = useState<string>()
   const [sharePercent, setSharePercent] = useState<10 | 25 | 50>(10)
   const [collateralAssetId, setCollateralAssetId] = useState<string>()
-  const cost = Math.ceil(quote.price * quantity * 1.015)
+  const grossCost = quote.price * quantity
+  const cost = stockPurchaseTotal(quote.price, quantity)
+  const buyCommission = cost - grossCost
   const financingPlayer = structuredClone(player)
   let releasedCash = 0
 
@@ -278,7 +281,9 @@ function StockFinancePanel({ stockId, onClose }: { stockId: string; onClose: () 
     <div className="v14-section-title"><span><small>ПОКУПКА АКЦИЙ</small><b>{quote.ticker} · {money(quote.price)}/шт.</b></span><button onClick={onClose}>×</button></div>
     <label>Количество<input type="number" inputMode="numeric" min="1" max="999" value={quantity} onChange={(event) => setQuantity(Math.max(1, Math.floor(Number(event.target.value) || 1)))}/></label>
     <div className="v14-summary-grid">
-      <span>Стоимость с комиссией <b>{money(cost)}</b></span>
+      <span>Цена акций <b>{money(grossCost)}</b></span>
+      <span>Комиссия {(STOCK_COMMISSION_RATE * 100).toFixed(1)}% <b>{money(buyCommission)}</b></span>
+      <span>Итого к оплате <b>{money(cost)}</b></span>
       <span>Денег после продаж <b>{money(financingPlayer.cash)}</b></span>
       <span>Освободишь из активов <b>{money(releasedCash)}</b></span>
       <span>Останется профинансировать <b className={gap > 0 ? 'bad' : 'good'}>{money(gap)}</b></span>
@@ -299,15 +304,44 @@ export function MarketDecision() {
   return <>
     <span className="eyebrow">БИРЖА · МЕСЯЦ {game.month}</span><h2>{game.marketHeadline}</h2>
     <p>Акции можно купить за свои, в кредит или под залог бизнеса. Залог самих акций создаёт риск маржин-колла.</p>
+    <section className="v16-market-explainer">
+      <b>Рост акции за месяц — не твоя прибыль</b>
+      <span>Твой результат считается от твоей средней цены покупки. Покупка и продажа теперь стоят по {(STOCK_COMMISSION_RATE * 100).toFixed(1)}%. Ниже отдельно показаны курс, комиссия и сумма на руки.</span>
+    </section>
     <div className="v14-stock-list">{game.stockMarket.map((quote) => {
       const holding = player.stocks.find((item) => item.stockId === quote.id)
       const free = holding ? stockFreeQuantity(holding) : 0
       const change = quote.previousPrice ? (quote.price / quote.previousPrice - 1) * 100 : 0
-      const result = holding ? calculateStockSale(holding.averagePrice, quote.price, free) : null
+      const totalCostBasis = holding ? (holding.costBasis ?? holding.averagePrice * holding.quantity) : 0
+      const freeCostBasis = holding && holding.quantity > 0 ? Math.round(totalCostBasis * free / holding.quantity) : 0
+      const result = holding ? calculateStockSale(holding.averagePrice, quote.price, free, STOCK_COMMISSION_RATE, freeCostBasis) : null
+      const entryMarketPrice = holding?.averageMarketPrice ?? (holding ? Math.round((holding.marketCostBasis ?? holding.averagePrice * holding.quantity / (1 + STOCK_COMMISSION_RATE)) / holding.quantity) : 0)
+      const freePurchaseFees = holding && holding.quantity > 0
+        ? Math.round((holding.purchaseFees ?? Math.max(0, totalCostBasis - entryMarketPrice * holding.quantity)) * free / holding.quantity)
+        : 0
       return <article key={quote.id}>
-        <div className="v14-stock-head"><span><b>{quote.ticker}</b><small>{quote.name} · див. {(quote.dividendYield * 100).toFixed(1)}%</small></span><strong>{money(quote.price)}<small className={change >= 0 ? 'good' : 'bad'}>{percent(change)}</small></strong></div>
-        {holding && <><div className="v14-summary-grid"><span>Куплено <b>{holding.quantity} шт. · средняя {money(holding.averagePrice)}</b></span><span>Свободно / заложено <b>{free} / {holding.pledgedQuantity ?? 0}</b></span><span>Получишь за свободные <b>{money(result?.proceeds ?? 0)}</b></span><span>Прибыль / убыток <b className={(result?.profit ?? 0) >= 0 ? 'good' : 'bad'}>{money(result?.profit ?? 0)} · {percent(result?.profitPercent ?? 0)}</b></span></div><div className="v14-stock-percent"><span>Продать:</span>{([25, 50, 75, 100] as const).map((share) => { const quantity = Math.max(1, Math.floor(free * share / 100)); return <button key={share} disabled={free <= 0} onClick={() => dispatch({ type: 'SELL_STOCK', stockId: quote.id, quantity })}>{share}%</button> })}</div><div className="v14-stock-percent"><span>Заложить:</span>{([25, 50, 75, 100] as const).map((share) => { const pledgeQuantity = Math.max(1, Math.floor(free * share / 100)); const pledgeAmount = Math.floor(pledgeQuantity * quote.price * 0.45); return <button key={share} disabled={free <= 0 || availableStockCollateral(player, holding, quote) <= 0} onClick={() => dispatch({ type: 'PLEDGE_STOCK', stockId: quote.id, percent: share })}>{share}% · +{money(pledgeAmount)}</button> })}</div></>}
-        <div className="v14-two-actions"><button disabled={player.cash < quote.price * 1.015} onClick={() => dispatch({ type: 'BUY_STOCK', stockId: quote.id, quantity: 1, funding: 'cash' })}>Купить 1</button><button onClick={() => setFinanceStockId(quote.id)}>Купить больше / финансирование</button></div>
+        <div className="v14-stock-head"><span><b>{quote.ticker}</b><small>{quote.name} · див. {(quote.dividendYield * 100).toFixed(1)}%</small></span><strong>{money(quote.price)}<small className={change >= 0 ? 'good' : 'bad'}>{percent(change)} за месяц</small></strong></div>
+        {holding && <div className="v16-stock-detail">
+          <div className="v14-summary-grid">
+            <span>Куплено <b>{holding.quantity} шт.</b></span>
+            <span>Свободно / заложено <b>{free} / {holding.pledgedQuantity ?? 0}</b></span>
+            <span>Средняя цена рынка при входе <b>{money(entryMarketPrice)}</b></span>
+            <span>Себестоимость с покупкой <b>{money(holding.averagePrice)}/шт.</b></span>
+            <span>Вложено в свободные акции <b>{money(result?.invested ?? 0)}</b></span>
+            <span>Комиссия покупки в них <b>{money(freePurchaseFees)}</b></span>
+          </div>
+          <div className="v16-stock-result">
+            <div><small>СЕЙЧАС БЕЗ ПРОДАЖИ</small><b>{money(result?.grossValue ?? 0)}</b><span className={(result?.grossProfit ?? 0) >= 0 ? 'good' : 'bad'}>Курс дал {(result?.grossProfit ?? 0) >= 0 ? '+' : ''}{money(result?.grossProfit ?? 0)}</span></div>
+            <div><small>ЕСЛИ ПРОДАТЬ СЕЙЧАС</small><b>{money(result?.proceeds ?? 0)}</b><span>Комиссия −{money(result?.commission ?? 0)}</span></div>
+          </div>
+          <div className={(result?.profit ?? 0) >= 0 ? 'v14-info' : 'v14-warning'}>
+            <b>Твой итог после продажи: {(result?.profit ?? 0) >= 0 ? '+' : ''}{money(result?.profit ?? 0)} · {percent(result?.profitPercent ?? 0)}</b>
+            <span>Цена безубыточности — {money(result?.breakEvenPrice ?? 0)}/шт. Всё выше неё уже даёт плюс после комиссии.</span>
+          </div>
+          <div className="v14-stock-percent"><span>Продать:</span>{([25, 50, 75, 100] as const).map((share) => { const quantity = Math.max(1, Math.floor(free * share / 100)); return <button key={share} disabled={free <= 0} onClick={() => dispatch({ type: 'SELL_STOCK', stockId: quote.id, quantity })}>{share}% · {quantity} шт.</button> })}</div>
+          <div className="v14-stock-percent"><span>Заложить:</span>{([25, 50, 75, 100] as const).map((share) => { const pledgeQuantity = Math.max(1, Math.floor(free * share / 100)); const pledgeAmount = Math.floor(pledgeQuantity * quote.price * 0.45); return <button key={share} disabled={free <= 0 || availableStockCollateral(player, holding, quote) <= 0} onClick={() => dispatch({ type: 'PLEDGE_STOCK', stockId: quote.id, percent: share })}>{share}% · +{money(pledgeAmount)}</button> })}</div>
+        </div>}
+        <div className="v14-two-actions"><button disabled={player.cash < stockPurchaseTotal(quote.price, 1)} onClick={() => dispatch({ type: 'BUY_STOCK', stockId: quote.id, quantity: 1, funding: 'cash' })}>Купить 1 <small>{money(stockPurchaseTotal(quote.price, 1))} с комиссией</small></button><button onClick={() => setFinanceStockId(quote.id)}>Купить больше / финансирование</button></div>
       </article>
     })}</div>
     {financeStockId && <StockFinancePanel stockId={financeStockId} onClose={() => setFinanceStockId(undefined)}/>} 
@@ -324,7 +358,7 @@ export function V14DecisionContent({ decision, commonSkip }: { decision: Decisio
   if (decision.kind === 'expense') return <><div className="decision-symbol bad-bg">!</div><span className="eyebrow">НЕПРЕДВИДЕННЫЙ РАСХОД</span><h2>{decision.title}</h2><p>Выбери: решить надёжно или сэкономить сейчас и принять риск.</p><div className="v14-action-list">{(decision.options ?? [{ id: 'full' as const, title: 'Оплатить', description: 'Закрыть расход полностью.', amount: decision.amount }]).map((option) => <button key={option.id} onClick={() => dispatch({ type: 'RESOLVE_EXPENSE', optionId: option.id })}><b>{option.title} · {money(option.amount)}</b><small>{option.description}{option.riskChance ? ` Риск ${(option.riskChance * 100).toFixed(0)}%.` : ''}</small></button>)}</div><button className="ghost-action" onClick={() => dispatch({ type: 'PAY_EXPENSE', withCredit: true })}>Полную сумму в кредит</button></>
   if (decision.kind === 'contract') return <><div className="decision-symbol good-bg">📋</div><span className="eyebrow">КОНТРАКТ</span><h2>{decision.title}</h2><p>{decision.description} Результат зависит от выбранного масштаба и навыка.</p><div className="v14-action-list">{decision.options.map((option) => <button disabled={player.cash < option.investment} key={option.id} onClick={() => dispatch({ type: 'TAKE_CONTRACT', optionId: option.id })}><b>{option.title}</b><small>Вложить {money(option.investment)} · получить {money(option.payout)} через {option.durationMonths} мес. · шанс {Math.round(option.successChance * 100)}%</small></button>)}</div>{commonSkip}</>
   if (decision.kind === 'auction') return <><div className="decision-symbol good-bg">🔨</div><span className="eyebrow">АУКЦИОН С СОПЕРНИКАМИ</span><h2>{decision.title}</h2><div className="v14-summary-grid"><span>Рыночная стоимость <b>{money(decision.marketValue)}</b></span><span>Текущая ставка <b>{money(decision.currentBid)}</b></span></div>{decision.issueRevealed && <div className={decision.issue && decision.issue !== 'none' ? 'v14-warning' : 'v14-info'}><b>{decision.issue && decision.issue !== 'none' ? 'Проверка нашла риск' : 'Документы чистые'}</b></div>}<div className="v14-action-list"><button disabled={decision.inspected || player.cash < Math.max(12_000, decision.marketValue * .015)} onClick={() => dispatch({ type: 'AUCTION_INSPECT' })}><b>Проверить документы</b><small>{money(Math.max(12_000, decision.marketValue * .015))}</small></button><button onClick={() => dispatch({ type: 'AUCTION_BID', amount: decision.currentBid + decision.minimumStep })}><b>Поднять до {money(decision.currentBid + decision.minimumStep)}</b><small>Боты могут перебить ставку</small></button></div><button className="ghost-action" onClick={() => dispatch({ type: 'AUCTION_WITHDRAW' })}>Выйти из аукциона</button></>
-  if (decision.kind === 'partnership') return <><div className="decision-symbol good-bg">🤝</div><span className="eyebrow">ПАРТНЁРСТВО</span><h2>{decision.title}</h2><p>{decision.description}</p><div className="v14-action-list"><button onClick={() => dispatch({ type: 'ACCEPT_PARTNERSHIP', ownership: .3 })}><b>Партнёр вкладывает 30%</b><small>У тебя остаётся 70% бизнеса</small></button><button onClick={() => dispatch({ type: 'ACCEPT_PARTNERSHIP', ownership: .5 })}><b>Разделить 50/50</b><small>Меньше взнос и меньше доход</small></button></div>{commonSkip}</>
+  if (decision.kind === 'partnership') return <PartnershipDecision decision={decision} commonSkip={commonSkip} />
   if (decision.kind === 'management') return <><div className="decision-symbol good-bg">🧭</div><span className="eyebrow">УПРАВЛЕНИЕ ПОРТФЕЛЕМ</span><h2>Наведи порядок в активах</h2><p>Здесь можно снизить дорогой платёж или временно защитить бизнес от случайных проблем.</p><div className="v14-action-list"><button disabled={!player.loans.some((loan) => !loan.collateralAssetId && !loan.collateralStockId)} onClick={() => dispatch({ type: 'MANAGEMENT_ACTION', action: 'refinance' })}><b>Рефинансировать дорогой кредит</b><small>Комиссия 2%, ставка станет ниже на 4 п.п.</small></button>{player.assets.map((asset) => <button key={asset.id} disabled={player.cash < assetMarketValue(asset) * .025} onClick={() => dispatch({ type: 'MANAGEMENT_ACTION', action: 'insure', assetId: asset.id })}><b>Застраховать: {asset.name}</b><small>{money(assetMarketValue(asset) * .025)} · защита на 3 месяца</small></button>)}</div>{commonSkip}</>
   return null
 }

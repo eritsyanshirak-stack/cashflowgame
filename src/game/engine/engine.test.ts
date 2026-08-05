@@ -4,6 +4,7 @@ import { executeCommand, emptyGame } from './engine'
 import { assessLoan, assetCashflow, competitionStandings, freedomProgress, isFinanciallyFree, loanPayment, monthlyCashflow, monthlyExpenses, monthlyStockDividends, netWorth, passiveIncome, stockMarketValue } from '../systems/economy'
 import type { Asset } from '../domain/types'
 import { playerLevel, skillLevel } from '../systems/progression'
+import { stockPurchaseTotal, stockSaleProceeds } from '../systems/stockSale'
 
 const startedGame = (seed = 7) => executeCommand(emptyGame(seed), { type: 'START_GAME', professionId: 'trainer', seed }).state
 const businessCashflow = (businessId: string) => {
@@ -326,12 +327,12 @@ describe('game engine', () => {
 
     expect(bought.accepted).toBe(true)
     expect(bought.state.players[0].stocks[0]).toMatchObject({ stockId: quote.id, quantity: 2 })
-    expect(bought.state.players[0].cash).toBe(150_000 - Math.ceil(quote.price * 2 * 1.015))
+    expect(bought.state.players[0].cash).toBe(150_000 - stockPurchaseTotal(quote.price, 2))
 
     const sold = executeCommand(bought.state, { type: 'SELL_STOCK', stockId: quote.id, quantity: 1 })
     expect(sold.accepted).toBe(true)
     expect(sold.state.players[0].stocks[0].quantity).toBe(1)
-    expect(sold.state.players[0].cash).toBe(bought.state.players[0].cash + Math.floor(quote.price * 0.985))
+    expect(sold.state.players[0].cash).toBe(bought.state.players[0].cash + stockSaleProceeds(quote.price, 1))
     expect(sold.state.players[0].experience).toBe(0)
     expect(executeCommand(sold.state, { type: 'SELL_STOCK', stockId: quote.id, quantity: 2 }).accepted).toBe(false)
   })

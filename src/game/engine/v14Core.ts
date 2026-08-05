@@ -4,6 +4,8 @@ import { assetCashflow, assetLiquidationProceeds, assetMarketValue, loanPayment,
 import { skillLevel } from '../systems/progression'
 import { createStockMarginCall, negotiateBuyerOffer, pledgeStockLoanTerms, pushSystemEvent, stockFreeQuantity } from '../systems/v14'
 import { buyerNegotiationSpecializationBonus, scheduleExpenseChain, stockCollateralRatio } from '../systems/v15'
+import { STOCK_COMMISSION_RATE, stockSaleProceeds } from '../systems/stockSale'
+import { assetInvestmentBasis, reduceAssetInvestmentBasis } from '../systems/v16'
 
 export interface V14CommandResult {
   handled: boolean
@@ -18,6 +20,8 @@ const accepted = (completeTurn = false): V14CommandResult => ({ handled: true, a
 const sellAssetAtPrice = (state: GameState, player: Player, assetId: string, grossPrice: number, label: string) => {
   const asset = player.assets.find((item) => item.id === assetId)
   if (!asset) return false
+  const invested = assetInvestmentBasis(asset)
+  const relatedDebt = player.loans.filter((loan) => loan.relatedAssetId === asset.id).reduce((sum, loan) => sum + loan.balance, 0)
   const collateralLoan = pledgedLoanForAsset(player, asset.id)
   const securedDebt = asset.loan + (collateralLoan?.balance ?? 0)
   const proceeds = assetLiquidationProceeds(player, asset, grossPrice)
@@ -35,7 +39,8 @@ const sellAssetAtPrice = (state: GameState, player: Player, assetId: string, gro
     termMonths: 36,
     missedPayments: 0,
   })
-  pushSystemEvent(state, label, `${asset.name}: цена ${grossPrice.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}.`, deficiency > 0 ? 'bad' : 'good')
+  const result = proceeds - invested - relatedDebt
+  pushSystemEvent(state, label, `${asset.name}: цена ${grossPrice.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽, результат к своим вложениям ${result >= 0 ? '+' : ''}${result.toLocaleString('ru-RU')} ₽${relatedDebt > 0 ? `, кредит на взнос остался ${relatedDebt.toLocaleString('ru-RU')} ₽` : ''}${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}.`, result >= 0 ? 'good' : 'bad')
   return true
 }
 
@@ -110,6 +115,7 @@ export const handleReadyV14Command = (state: GameState, command: GameCommand, ra
     const proceeds = Math.max(0, grossPrice - debtPart)
     const remainingRatio = 1 - soldRatio
     player.cash += proceeds
+    reduceAssetInvestmentBasis(asset, soldRatio)
     asset.ownership = Math.round((asset.ownership - ownershipToSell) * 100) / 100
     asset.price = Math.round(asset.price * remainingRatio)
     asset.downPayment = Math.round(asset.downPayment * remainingRatio)
@@ -172,14 +178,26 @@ export const handleReadyV14Command = (state: GameState, command: GameCommand, ra
       player.loans = player.loans.filter((item) => item.id !== loan.id)
       holding.pledgedQuantity = Math.max(0, (holding.pledgedQuantity ?? 0) - call.pledgedQuantity)
     } else {
-      const quantityToSell = Math.min(call.pledgedQuantity, Math.max(1, Math.ceil(call.requiredPayment / Math.max(1, quote.price * 0.985))))
-      const proceeds = Math.floor(quantityToSell * quote.price * 0.985)
+      const quantityToSell = Math.min(call.pledgedQuantity, Math.max(1, Math.ceil(call.requiredPayment / Math.max(1, quote.price * (1 - STOCK_COMMISSION_RATE)))))
+      const proceeds = stockSaleProceeds(quote.price, quantityToSell)
+      const quantityBeforeSale = holding.quantity
+      const totalCostBasis = holding.costBasis ?? holding.averagePrice * quantityBeforeSale
+      const totalMarketCostBasis = holding.marketCostBasis ?? (holding.averageMarketPrice ?? Math.round(holding.averagePrice / (1 + STOCK_COMMISSION_RATE))) * quantityBeforeSale
+      const soldCostBasis = Math.round(totalCostBasis * quantityToSell / Math.max(1, quantityBeforeSale))
+      const soldMarketCostBasis = Math.round(totalMarketCostBasis * quantityToSell / Math.max(1, quantityBeforeSale))
       holding.quantity -= quantityToSell
+      holding.costBasis = Math.max(0, totalCostBasis - soldCostBasis)
+      holding.marketCostBasis = Math.max(0, totalMarketCostBasis - soldMarketCostBasis)
+      holding.purchaseFees = Math.max(0, holding.costBasis - holding.marketCostBasis)
       holding.pledgedQuantity = Math.max(0, (holding.pledgedQuantity ?? 0) - quantityToSell)
       loan.collateralStockQuantity = Math.max(0, (loan.collateralStockQuantity ?? 0) - quantityToSell)
       loan.balance = Math.max(0, loan.balance - proceeds)
       loan.monthlyPayment = loanPayment(loan.balance, loan.annualRate, Math.max(1, loan.termMonths))
       if (holding.quantity <= 0) player.stocks = player.stocks.filter((item) => item.stockId !== holding.stockId)
+      else {
+        holding.averagePrice = Math.round(holding.costBasis / holding.quantity)
+        holding.averageMarketPrice = Math.round(holding.marketCostBasis / holding.quantity)
+      }
       if (loan.balance <= 0 || (loan.collateralStockQuantity ?? 0) <= 0) player.loans = player.loans.filter((item) => item.id !== loan.id)
     }
     state.activeMarginCall = createStockMarginCall(player, state.stockMarket)
@@ -261,6 +279,7 @@ export const handleDecisionV14Command = (state: GameState, command: GameCommand,
       const cost = Math.round(assetMarketValue(asset) * 0.025)
       if (player.cash < cost) return rejected('Недостаточно денег')
       player.cash -= cost
+      asset.cashInvested = assetInvestmentBasis(asset) + cost
       asset.insuredUntilMonth = state.month + 3
       pushSystemEvent(state, 'Бизнес застрахован', `${asset.name}: защита до месяца ${state.month + 3}.`, 'good')
     }
