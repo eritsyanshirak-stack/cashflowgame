@@ -4,6 +4,7 @@ on:
     branches: [balance-v1.6-work]
     paths:
       - scripts/apply_v16_audit_fix.py
+      - .github/workflows/finalize-v16-audit-fixes.yml
 permissions:
   contents: write
 jobs:
