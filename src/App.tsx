@@ -10,6 +10,7 @@ import { useGameStore } from './store/gameStore'
 import { developmentCost, nextPlayerLevelXp, nextSkillXp, playerLevel, rankName, skillDefinitions, skillLevel, trainingCost } from './game/systems/progression'
 import { AssetSalesCore, BuyerOfferModal, DealFinancingCore, GlobalEventBanner, MarginCallModal, V14DecisionContent } from './V14UI'
 import { DealProfilePanel, EventChainPanel, PortfolioSynergyPanel, RivalIntentPanel, SellerCounterPanel, SpecializationModal } from './V15UI'
+import { dealProjectedOperatingIncome } from './game/systems/v15'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
 const TUTORIAL_KEY = 'vyhod-iz-kruga-tutorial-v1'
@@ -334,10 +335,12 @@ function DecisionSheet({ decision, dispatch }: { decision: Decision; dispatch: (
     const business = businesses.find((item) => item.id === decision.businessId)!
     const financedLoan = Math.min(decision.askingPrice, Math.round(business.loan * (decision.askingPrice / business.price)))
     const payment = loanPayment(financedLoan, business.loanRate, business.loanTermMonths)
-    const flow = business.revenue - business.operatingCosts - payment
+    const operatingIncome = dealProjectedOperatingIncome(decision.profile, decision.inspection ?? 'none', business.revenue, business.operatingCosts)
+    const flow = operatingIncome - payment
+    const flowLabel = decision.profile ? (decision.inspection === 'full' ? 'Проверенный поток' : 'Заявленный поток') : 'Поток после запуска'
     body = <>
       {decision.kind === 'business' ? <div className="deal-title"><span>{business.icon}</span><div><small>{business.category} · уровень {business.requiredLevel}</small><h2>{business.name}</h2></div></div> : <><div className="decision-symbol good-bg">★</div><span className="eyebrow">РЕДКАЯ ВОЗМОЖНОСТЬ</span><h2>{decision.title}</h2><p>{decision.description}</p></>}
-      <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(Math.max(0, decision.askingPrice - financedLoan))} /><Metric label="Риск" value={business.riskRating === 'low' ? 'Низкий' : business.riskRating === 'medium' ? 'Средний' : 'Высокий'} /><Metric label="Поток после запуска" value={money(flow) + '/мес'} good={flow >= 0} bad={flow < 0} /></div>
+      <div className="deal-grid"><Metric label="Цена" value={money(decision.askingPrice)} /><Metric label="Первый взнос" value={money(Math.max(0, decision.askingPrice - financedLoan))} /><Metric label="Риск" value={business.riskRating === 'low' ? 'Низкий' : business.riskRating === 'medium' ? 'Средний' : 'Высокий'} /><Metric label={flowLabel} value={money(flow) + '/мес'} good={flow >= 0} bad={flow < 0} /></div>
       <DealProfilePanel decision={decision} />
       <div className="bank-verdict"><div><small>ПРОВЕРКА ДОКУМЕНТОВ</small><b>{decision.inspection && decision.inspection !== 'none' ? (decision.issueRevealed ? (decision.hiddenIssue && decision.hiddenIssue !== 'none' ? 'Найдена проблема' : 'Проверка чистая') : 'Результат неоднозначный') : 'Не проводилась'}</b></div><span>{decision.issueRevealed && decision.hiddenIssue && decision.hiddenIssue !== 'none' ? ({ documents: 'Проблемы с документами или лицензией', lease: 'Риск по аренде', repair: 'Скрытый ремонт', 'hidden-debt': 'Скрытый долг' } as const)[decision.hiddenIssue] : 'Без проверки риск скрытых проблем выше'}</span></div>
       {(!decision.inspection || decision.inspection === 'none') && <div className="split-actions two"><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'basic' })}>Базовая проверка</button><button onClick={() => dispatch({ type: 'INSPECT_BUSINESS', level: 'full' })}>Полная проверка</button></div>}

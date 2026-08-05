@@ -3,6 +3,8 @@ import { assetCashflow } from './game/systems/economy'
 import { playerLevel } from './game/systems/progression'
 import {
   dealFactLines,
+  dealVerifiedCosts,
+  dealVerifiedRevenue,
   specializationDescriptions,
   specializationNames,
 } from './game/systems/v15'
@@ -15,9 +17,10 @@ export function DealProfilePanel({ decision }: { decision: Extract<Decision, { k
   if (!profile) return null
   const known = new Set(decision.revealedFacts ?? [])
   const facts = dealFactLines(profile)
-  const estimatedRevenue = Math.round(profile.declaredRevenue * profile.revenueMultiplier)
-  const estimatedCosts = Math.round(profile.declaredCosts * profile.costMultiplier)
+  const estimatedRevenue = dealVerifiedRevenue(profile)
+  const estimatedCosts = dealVerifiedCosts(profile)
   const inspected = (decision.inspection ?? 'none') !== 'none'
+  const fullyInspected = decision.inspection === 'full'
 
   return <section className="v15-deal-profile">
     <div className="v15-section-head">
@@ -27,8 +30,8 @@ export function DealProfilePanel({ decision }: { decision: Extract<Decision, { k
     <div className="v15-declared-grid">
       <span>Заявленная выручка <b>{money(profile.declaredRevenue)}/мес.</b></span>
       <span>Заявленные расходы <b>{money(profile.declaredCosts)}/мес.</b></span>
-      {inspected && <span>Оценка выручки <b>{money(estimatedRevenue)}/мес.</b></span>}
-      {inspected && <span>Оценка расходов <b>{money(estimatedCosts)}/мес.</b></span>}
+      {fullyInspected && <span>Подтверждённая выручка <b>{money(estimatedRevenue)}/мес.</b></span>}
+      {fullyInspected && <span>Подтверждённые расходы <b>{money(estimatedCosts)}/мес.</b></span>}
     </div>
     <div className="v15-fact-list">{facts.map((fact, index) => {
       const visible = known.has(fact)

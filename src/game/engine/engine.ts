@@ -5,7 +5,7 @@ import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, t
 import { createContractOptions, createStockMarginCall, emptyRecentCards, pickFresh, processAssetListings, settleContracts, stockFreeQuantity, updateGlobalEvent } from '../systems/v14'
 import { handleDecisionV14Command, handleReadyV14Command, quickSellAssetForFunding, sellAssetShareForFunding } from './v14Core'
 import { handleDecisionV15Command, handleReadyV15Command } from './v15Core'
-import { applyDealProfileToAsset, createDealProfile, createSellerCounter, negotiationSpecializationBonus, refreshPortfolioSynergies, refreshRivalIntents, resolveEventChains, revealedDealFacts, scheduleDealChain } from '../systems/v15'
+import { applyDealProfileToAsset, createDealProfile, createSellerCounter, dealProjectedOperatingIncome, negotiationSpecializationBonus, refreshPortfolioSynergies, refreshRivalIntents, resolveEventChains, revealedDealFacts, scheduleDealChain } from '../systems/v15'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
   version: 10,
@@ -416,7 +416,7 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     if (funding === 'credit' && player.cash < downPayment * 0.3) return null
     const collateral = funding === 'secured' ? player.assets.find((asset) => asset.id === collateralAssetId) : undefined
     if (funding === 'secured' && !collateral) return null
-    const projectedIncome = Math.round((business.revenue - business.operatingCosts) * ownership)
+    const projectedIncome = Math.round(dealProjectedOperatingIncome(profile, diligence, business.revenue, business.operatingCosts) * ownership)
     const assessment = assessLoan(player, acquisitionGap, state.difficulty, collateral, projectedIncome, projectedAssetPayment, state.globalEvent?.creditRateDelta ?? 0)
     if (!assessment.approved) return null
     player.loans.push({

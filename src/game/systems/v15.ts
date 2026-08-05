@@ -2,6 +2,7 @@ import type {
   Asset,
   BuyerArchetype,
   DealProfile,
+  DueDiligence,
   EventChain,
   GameState,
   Player,
@@ -78,6 +79,23 @@ export const createDealProfile = (
   }
 }
 
+export const dealVerifiedRevenue = (profile: DealProfile) =>
+  Math.round(profile.declaredRevenue * profile.revenueMultiplier)
+
+export const dealVerifiedCosts = (profile: DealProfile) =>
+  Math.round(profile.declaredCosts * profile.costMultiplier)
+
+export const dealProjectedOperatingIncome = (
+  profile: DealProfile | undefined,
+  diligence: DueDiligence,
+  fallbackRevenue: number,
+  fallbackCosts: number,
+) => {
+  if (!profile) return fallbackRevenue - fallbackCosts
+  if (diligence === 'full') return dealVerifiedRevenue(profile) - dealVerifiedCosts(profile)
+  return profile.declaredRevenue - profile.declaredCosts
+}
+
 export const dealFactLines = (profile: DealProfile) => [
   `Локация: ${profile.location}`,
   `Срок аренды: ${profile.leaseMonths} мес.`,
@@ -85,8 +103,8 @@ export const dealFactLines = (profile: DealProfile) => [
   `Зависимость от владельца: ${profile.ownerDependencyLabel}`,
   `Рейтинг клиентов: ${profile.customerRating.toFixed(1)} из 5`,
   `Причина продажи: ${profile.sellerReason}`,
-  `Подтверждённая выручка: ${Math.round(profile.declaredRevenue * profile.revenueMultiplier).toLocaleString('ru-RU')} ₽/мес.`,
-  `Подтверждённые расходы: ${Math.round(profile.declaredCosts * profile.costMultiplier).toLocaleString('ru-RU')} ₽/мес.`,
+  `Подтверждённая выручка: ${dealVerifiedRevenue(profile).toLocaleString('ru-RU')} ₽/мес.`,
+  `Подтверждённые расходы: ${dealVerifiedCosts(profile).toLocaleString('ru-RU')} ₽/мес.`,
 ]
 
 export const revealedDealFacts = (profile: DealProfile, level: 'basic' | 'full') =>
@@ -125,8 +143,8 @@ export const applyDealProfileToAsset = (
 ) => {
   if (!profile) return asset
   asset.dealProfile = profile
-  asset.revenue = Math.round(asset.revenue * profile.revenueMultiplier)
-  asset.operatingCosts = Math.round(asset.operatingCosts * profile.costMultiplier)
+  asset.revenue = dealVerifiedRevenue(profile)
+  asset.operatingCosts = dealVerifiedCosts(profile)
   asset.marketValue = Math.round(assetMarketValue(asset) * profile.valueMultiplier)
 
   if (sellerTerm === 'transition') {

@@ -4,7 +4,7 @@ import type { Asset, Decision, Funding, GameCommand } from './game/domain/types'
 import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, loanPayment, pledgedLoanForAsset, totalDebt } from './game/systems/economy'
 import { calculateStockSale } from './game/systems/stockSale'
 import { availableStockCollateral, listingMonthsRemaining, stockFreeQuantity } from './game/systems/v14'
-import { buyerArchetypeLabel } from './game/systems/v15'
+import { buyerArchetypeLabel, dealProjectedOperatingIncome } from './game/systems/v15'
 import { useGameStore } from './store/gameStore'
 
 const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`
@@ -76,7 +76,7 @@ export function DealFinancingCore({ decision }: { decision: Extract<Decision, { 
 
   const cashAfterSales = financingPlayer.cash
   const gap = Math.max(0, downPayment - cashAfterSales)
-  const projectedIncome = business.revenue - business.operatingCosts
+  const projectedIncome = dealProjectedOperatingIncome(decision.profile, decision.inspection ?? 'none', business.revenue, business.operatingCosts)
   const rateDelta = game.globalEvent?.creditRateDelta ?? 0
   const unsecured = assessLoan(financingPlayer, gap, game.difficulty, undefined, projectedIncome, businessPayment, rateDelta)
   const collateralOptions = financingPlayer.assets.map((asset) => ({
