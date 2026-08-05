@@ -33,11 +33,11 @@ const asset = (id: string, category: string): Asset => ({
   status: 'active',
 })
 
-const player = (): Player => ({
+const player = (experience = 260): Player => ({
   id: 'human', name: 'Ты', isBot: false, professionId: 'trainer', position: 0,
   cash: 200_000, salary: 180_000, baseExpenses: 128_000, baseDebt: 0,
   assets: [], loans: [], deposit: 0, bonds: 0, stocks: [], resaleDeals: [], activeContracts: [],
-  experience: 700, skills: { negotiation: 0, marketing: 0, management: 0, finance: 0, brand: 0 },
+  experience, skills: { negotiation: 0, marketing: 0, management: 0, finance: 0, brand: 0 },
   status: 'active', eliminatedMonth: null, freedomStreak: 0,
 })
 
@@ -80,15 +80,23 @@ describe('Balance v1.5', () => {
     expect(state.eventChains).toHaveLength(0)
   })
 
-  it('locks one specialization and applies entrepreneur trade-off', () => {
+  it('unlocks specialization exactly at level three and locks the choice', () => {
     let state = emptyGame(2)
     state.phase = 'ready'
-    state.players = [player()]
+    state.players = [player(260)]
     const result = executeCommand(state, { type: 'CHOOSE_SPECIALIZATION', specialization: 'entrepreneur' })
     expect(result.accepted).toBe(true)
     expect(result.state.players[0].specialization).toBe('entrepreneur')
     expect(result.state.players[0].salary).toBe(0)
     const second = executeCommand(result.state, { type: 'CHOOSE_SPECIALIZATION', specialization: 'operator' })
     expect(second.accepted).toBe(false)
+  })
+
+  it('rejects specialization before level three', () => {
+    const state = emptyGame(3)
+    state.phase = 'ready'
+    state.players = [player(259)]
+    const result = executeCommand(state, { type: 'CHOOSE_SPECIALIZATION', specialization: 'operator' })
+    expect(result.accepted).toBe(false)
   })
 })
