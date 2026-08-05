@@ -20,7 +20,7 @@ jobs:
           cache: npm
       - name: Reconstruct verified source bundle
         run: |
-          cat .tmp/v16part00 .tmp/v16part01 .tmp/v16part02 .tmp/v16part03 .tmp/v16part04 | base64 -d > /tmp/v16-modified-files.tar.gz
+          cat .tmp/v16part00 .tmp/v16part01 .tmp/v16part02 .tmp/v16part03 .tmp/v16part04 | tr -cd 'A-Za-z0-9+/=' | base64 -d > /tmp/v16-modified-files.tar.gz
           echo '3f74df0ba8720ddfdf39fa59caaf85fd272d2f3f25e34093f4723559a4b6a0e3  /tmp/v16-modified-files.tar.gz' | sha256sum -c -
           tar -xzf /tmp/v16-modified-files.tar.gz
       - name: Install dependencies
