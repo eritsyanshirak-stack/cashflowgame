@@ -42,7 +42,7 @@ export function PartnershipDecision({ decision, commonSkip }: {
         <button onClick={() => dispatch({ type: 'NEGOTIATE_PARTNERSHIP', request: 'bold' })}><b>Жёсткий торг</b><small>Попробовать ещё −6%</small></button>
       </div>
     </section>}
-    {decision.negotiationNote && <div className={decision.negotiationSucceeded ? 'v14-info' : 'v14-warning'}><b>{decision.negotiationSucceeded ? 'Условия улучшены' : 'Партнёр не продавил скидку'}</b><span>{decision.negotiationNote}</span></div>}
+    {decision.negotiationNote && <div className={decision.negotiationSucceeded ? 'v14-info' : 'v14-warning'}><b>{decision.negotiationSucceeded ? 'Условия улучшены' : 'Цена осталась прежней'}</b><span>{decision.negotiationNote}</span></div>}
 
     <div className="v16-partner-options">{options.map(({ partnerShare, terms }) => {
       const missing = Math.max(0, terms.playerCashNeeded - player.cash)
