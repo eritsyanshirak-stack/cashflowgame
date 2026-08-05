@@ -1,5 +1,6 @@
 import type { GameCommand, GameState } from '../domain/types'
 import { pushSystemEvent } from '../systems/v14'
+import { playerLevel } from '../systems/progression'
 import {
   buyerNegotiationSpecializationBonus,
   refreshPortfolioSynergies,
@@ -20,7 +21,7 @@ export const handleReadyV15Command = (state: GameState, command: GameCommand): V
   const player = state.players[0]
   if (command.type !== 'CHOOSE_SPECIALIZATION') return { handled: false, accepted: false }
   if (player.specialization) return rejected('Специализация уже выбрана')
-  if (player.experience < 650) return rejected('Специализация открывается на третьем уровне')
+  if (playerLevel(player) < 3) return rejected('Специализация открывается на третьем уровне')
 
   player.specialization = command.specialization
   if (command.specialization === 'entrepreneur') {
@@ -54,6 +55,7 @@ export const handleDecisionV15Command = (state: GameState, command: GameCommand)
   }
 
   if (command.action === 'acceptTerm') {
+    decision.askingPrice = decision.originalAskingPrice ?? decision.askingPrice
     decision.sellerTerm = decision.sellerCounter.term
     decision.negotiationNote = decision.sellerCounter.note
     decision.sellerCounter = undefined
@@ -61,6 +63,7 @@ export const handleDecisionV15Command = (state: GameState, command: GameCommand)
     return accepted()
   }
 
+  decision.askingPrice = decision.originalAskingPrice ?? decision.askingPrice
   decision.negotiationNote = 'Ты отказался от контроффера. Сделка остаётся доступна по исходной цене.'
   decision.sellerCounter = undefined
   pushSystemEvent(state, 'Контроффер отклонён', decision.negotiationNote, 'neutral')
