@@ -1,0 +1,15 @@
+name: Export v1.6 audit snapshot
+on:
+  push:
+    branches: [balance-v1.6-audit-snapshot]
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tar --exclude=.git -czf /tmp/cashflow-v16-audit.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashflow-v16-audit
+          path: /tmp/cashflow-v16-audit.tar.gz
+          retention-days: 1
