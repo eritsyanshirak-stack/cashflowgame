@@ -19,6 +19,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: python scripts/apply_v17_stock_audit.py
+      - run: python scripts/fix_v17_version.py
       - run: npm ci
       - run: npm test
       - run: npm run lint
@@ -30,7 +31,7 @@ jobs:
           cp -R dist/. /tmp/cashflow-v17-preview/
       - name: Commit verified source
         run: |
-          rm -f scripts/apply_v17_stock_audit.py .github/workflows/finalize-v17-stock-audit.yml
+          rm -f scripts/apply_v17_stock_audit.py scripts/fix_v17_version.py .github/workflows/finalize-v17-stock-audit.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
