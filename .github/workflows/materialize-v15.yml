@@ -19,6 +19,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - name: Fix one-time source anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply-v15.py')
+          text = path.read_text()
+          text = text.replace('{decision.negotiationNote && <div className=\\"negotiation-note\\">{decision.negotiationNote}</div>}', '{decision.kind === \'business\' && decision.negotiationNote && <div className=\\"negotiation-note\\">{decision.negotiationNote}</div>}')
+          path.write_text(text)
+          PY
       - name: Apply v1.5 source changes
         run: python3 scripts/apply-v15.py
       - name: Install dependencies
@@ -28,7 +37,7 @@ jobs:
       - name: TypeScript and production build
         run: npm run build
       - name: Remove one-time materializer
-        run: rm -f scripts/apply-v15.py .github/workflows/materialize-v15.yml
+        run: rm -f scripts/apply-v15.py .github/workflows/materialize-v15.yml .v15-materialize-trigger
       - name: Commit materialized source
         run: |
           git config user.name "github-actions[bot]"
