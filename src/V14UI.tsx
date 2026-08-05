@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { businesses } from './game/content/content'
 import type { Asset, Decision, Funding, GameCommand } from './game/domain/types'
 import { assessLoan, assetCashflow, assetLiquidationProceeds, assetMarketValue, availableCollateral, loanPayment, pledgedLoanForAsset, totalDebt } from './game/systems/economy'
-import { calculateStockSale, STOCK_COMMISSION_RATE, stockPurchaseTotal } from './game/systems/stockSale'
+import { calculateStockSale, STOCK_COMMISSION_RATE, stockMonthlyChangePercent, stockPurchaseTotal } from './game/systems/stockSale'
 import { availableStockCollateral, listingMonthsRemaining, stockFreeQuantity } from './game/systems/v14'
 import { buyerArchetypeLabel, dealProjectedOperatingIncome } from './game/systems/v15'
 import { useGameStore } from './store/gameStore'
@@ -311,10 +311,14 @@ export function MarketDecision() {
     <div className="v14-stock-list">{game.stockMarket.map((quote) => {
       const holding = player.stocks.find((item) => item.stockId === quote.id)
       const free = holding ? stockFreeQuantity(holding) : 0
-      const change = quote.previousPrice ? (quote.price / quote.previousPrice - 1) * 100 : 0
+      const change = stockMonthlyChangePercent(quote.previousPrice, quote.price)
       const totalCostBasis = holding ? (holding.costBasis ?? holding.averagePrice * holding.quantity) : 0
       const freeCostBasis = holding && holding.quantity > 0 ? Math.round(totalCostBasis * free / holding.quantity) : 0
-      const result = holding ? calculateStockSale(holding.averagePrice, quote.price, free, STOCK_COMMISSION_RATE, freeCostBasis) : null
+      const totalMarketCostBasis = holding ? (holding.marketCostBasis ?? (holding.averageMarketPrice ?? Math.round(holding.averagePrice / (1 + STOCK_COMMISSION_RATE))) * holding.quantity) : 0
+      const freeMarketCostBasis = holding && holding.quantity > 0 ? Math.round(totalMarketCostBasis * free / holding.quantity) : 0
+      const freeDividends = holding && holding.quantity > 0 ? Math.round((holding.cumulativeDividends ?? 0) * free / holding.quantity) : 0
+      const freeFinancingCosts = holding && holding.quantity > 0 ? Math.round((holding.cumulativeFinancingCosts ?? 0) * free / holding.quantity) : 0
+      const result = holding ? calculateStockSale(holding.averagePrice, quote.price, free, STOCK_COMMISSION_RATE, freeCostBasis, { marketInvested: freeMarketCostBasis, cumulativeDividends: freeDividends, financingCosts: freeFinancingCosts }) : null
       const entryMarketPrice = holding?.averageMarketPrice ?? (holding ? Math.round((holding.marketCostBasis ?? holding.averagePrice * holding.quantity / (1 + STOCK_COMMISSION_RATE)) / holding.quantity) : 0)
       const freePurchaseFees = holding && holding.quantity > 0
         ? Math.round((holding.purchaseFees ?? Math.max(0, totalCostBasis - entryMarketPrice * holding.quantity)) * free / holding.quantity)
@@ -331,13 +335,19 @@ export function MarketDecision() {
             <span>Комиссия покупки в них <b>{money(freePurchaseFees)}</b></span>
           </div>
           <div className="v16-stock-result">
-            <div><small>СЕЙЧАС БЕЗ ПРОДАЖИ</small><b>{money(result?.grossValue ?? 0)}</b><span className={(result?.grossProfit ?? 0) >= 0 ? 'good' : 'bad'}>Курс дал {(result?.grossProfit ?? 0) >= 0 ? '+' : ''}{money(result?.grossProfit ?? 0)}</span></div>
-            <div><small>ЕСЛИ ПРОДАТЬ СЕЙЧАС</small><b>{money(result?.proceeds ?? 0)}</b><span>Комиссия −{money(result?.commission ?? 0)}</span></div>
+            <div><small>ИЗМЕНЕНИЕ ЦЕНЫ</small><b className={(result?.priceProfit ?? 0) >= 0 ? 'good' : 'bad'}>{(result?.priceProfit ?? 0) >= 0 ? '+' : ''}{money(result?.priceProfit ?? 0)}</b><span>Без торговых комиссий</span></div>
+            <div><small>ДО ПРОДАЖИ</small><b className={(result?.preSaleProfit ?? 0) >= 0 ? 'good' : 'bad'}>{(result?.preSaleProfit ?? 0) >= 0 ? '+' : ''}{money(result?.preSaleProfit ?? 0)}</b><span>После комиссии покупки −{money(result?.purchaseCommission ?? 0)}</span></div>
+            <div><small>ЕСЛИ ПРОДАТЬ СЕЙЧАС</small><b>{money(result?.proceeds ?? 0)}</b><span>Комиссия продажи −{money(result?.commission ?? 0)}</span></div>
           </div>
-          <div className={(result?.profit ?? 0) >= 0 ? 'v14-info' : 'v14-warning'}>
-            <b>Твой итог после продажи: {(result?.profit ?? 0) >= 0 ? '+' : ''}{money(result?.profit ?? 0)} · {percent(result?.profitPercent ?? 0)}</b>
-            <span>Цена безубыточности — {money(result?.breakEvenPrice ?? 0)}/шт. Всё выше неё уже даёт плюс после комиссии.</span>
+          <div className={(result?.ownershipProfit ?? 0) >= 0 ? 'v14-info' : 'v14-warning'}>
+            <b>Результат акций: {(result?.ownershipProfit ?? 0) >= 0 ? '+' : ''}{money(result?.ownershipProfit ?? 0)} · {percent(result?.ownershipProfitPercent ?? 0)}</b>
+            <span>После обеих комиссий и с дивидендами +{money(result?.cumulativeDividends ?? 0)}.</span>
           </div>
+          {(result?.financingCosts ?? 0) > 0 && <div className={(result?.strategyProfit ?? 0) >= 0 ? 'v14-info' : 'v14-warning'}>
+            <b>Итог стратегии с кредитом: {(result?.strategyProfit ?? 0) >= 0 ? '+' : ''}{money(result?.strategyProfit ?? 0)} · {percent(result?.strategyProfitPercent ?? 0)}</b>
+            <span>Стоимость финансирования за время владения −{money(result?.financingCosts ?? 0)}.</span>
+          </div>}
+          <div className="v16-return-note">Точка безубыточности стратегии — {money(result?.strategyBreakEvenPrice ?? result?.breakEvenPrice ?? 0)}/шт. Она учитывает комиссии, полученные дивиденды и стоимость кредита.</div>
           <div className="v14-stock-percent"><span>Продать:</span>{([25, 50, 75, 100] as const).map((share) => { const quantity = Math.max(1, Math.floor(free * share / 100)); return <button key={share} disabled={free <= 0} onClick={() => dispatch({ type: 'SELL_STOCK', stockId: quote.id, quantity })}>{share}% · {quantity} шт.</button> })}</div>
           <div className="v14-stock-percent"><span>Заложить:</span>{([25, 50, 75, 100] as const).map((share) => { const pledgeQuantity = Math.max(1, Math.floor(free * share / 100)); const pledgeAmount = Math.floor(pledgeQuantity * quote.price * 0.45); return <button key={share} disabled={free <= 0 || availableStockCollateral(player, holding, quote) <= 0} onClick={() => dispatch({ type: 'PLEDGE_STOCK', stockId: quote.id, percent: share })}>{share}% · +{money(pledgeAmount)}</button> })}</div>
         </div>}

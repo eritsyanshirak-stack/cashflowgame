@@ -1,6 +1,7 @@
 import { contractCards, globalEvents } from '../content/content'
 import type { BuyerOffer, ContractOption, GameEvent, GameState, MarginCall, Player, RecentCards, StockHolding, StockQuote } from '../domain/types'
 import { assetMarketValue, loanPayment } from './economy'
+import { STOCK_MIN_PRICE } from './stockSale'
 import { skillLevel } from './progression'
 import { buyerArchetypeLabel, buyerOfferMultiplier, chooseBuyerArchetype, contractSpecializationBonus, stockCollateralRatio } from './v15'
 
@@ -233,7 +234,7 @@ export const updateGlobalEvent = (state: GameState, random: () => number) => {
   }
   if (selected.sector) {
     for (const quote of state.stockMarket) {
-      if (quote.sector === selected.sector) quote.price = Math.max(500, Math.round(quote.price * (1 + selected.stockImpact)))
+      if (quote.sector === selected.sector) quote.price = Math.max(STOCK_MIN_PRICE, Math.round(quote.price * (1 + selected.stockImpact)))
     }
   }
   pushSystemEvent(state, selected.title, `${selected.description} Событие действует до месяца ${state.month + selected.duration}.`, selected.revenueMultiplier >= 1 && selected.stockImpact >= 0 ? 'good' : selected.revenueMultiplier < 1 || selected.stockImpact < 0 ? 'bad' : 'neutral')

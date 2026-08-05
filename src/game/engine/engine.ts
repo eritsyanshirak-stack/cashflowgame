@@ -6,11 +6,11 @@ import { createContractOptions, createStockMarginCall, emptyRecentCards, pickFre
 import { handleDecisionV14Command, handleReadyV14Command, quickSellAssetForFunding, sellAssetShareForFunding } from './v14Core'
 import { handleDecisionV15Command, handleReadyV15Command } from './v15Core'
 import { applyDealProfileToAsset, createDealProfile, createSellerCounter, dealProjectedOperatingIncome, negotiationSpecializationBonus, refreshPortfolioSynergies, refreshRivalIntents, resolveEventChains, revealedDealFacts, scheduleDealChain } from '../systems/v15'
-import { STOCK_COMMISSION_RATE, stockPurchaseTotal, stockSaleProceeds } from '../systems/stockSale'
+import { clampStockPriceForMonth, STOCK_COMMISSION_RATE, STOCK_MIN_PRICE, stockPurchaseTotal, stockSaleProceeds } from '../systems/stockSale'
 import { addAssetInvestment, calculateAssetExitResult, calculatePartnershipTerms, recordAssetCashReturn, recordAssetNetCashflow, reduceAssetInvestmentBasis } from '../systems/v16'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
-  version: 11,
+  version: 12,
   seed: seed >>> 0,
   phase: 'setup',
   day: 1,
@@ -209,15 +209,20 @@ const updateStockMarket = (state: GameState) => {
     const sectorImpact = quote.sector === headline.sector ? headline.impact : 0
     const marketNoise = (random(state) * 2 - 1) * settings.marketVolatility * 1.45
     const move = Math.max(-0.32, Math.min(0.36, sectorImpact + marketNoise))
-    quote.price = Math.max(500, Math.round(quote.price * (1 + move)))
+    quote.price = Math.max(STOCK_MIN_PRICE, Math.round(quote.price * (1 + move)))
   })
   if (random(state) < 0.12) {
     const quote = pick(state, state.stockMarket)
     const crash = random(state) < 0.48
     const move = crash ? -0.5 : 0.5 + random(state) * 0.15
-    quote.previousPrice = quote.price
-    quote.price = Math.max(500, Math.round(quote.price * (1 + move)))
+    quote.price = Math.max(STOCK_MIN_PRICE, Math.round(quote.price * (1 + move)))
     state.marketHeadline = crash ? `${quote.ticker}: обвал на 50%` : `${quote.ticker}: сильный рост ${Math.round(move * 100)}%`
+  }
+}
+
+const clampFinalStockMoves = (state: GameState) => {
+  for (const quote of state.stockMarket) {
+    quote.price = clampStockPriceForMonth(quote.previousPrice, quote.price)
   }
 }
 
@@ -382,6 +387,23 @@ const recordMonthlyAssetReturns = (player: Player) => {
   }
 }
 
+const recordMonthlyStockReturns = (player: Player, market: GameState['stockMarket']) => {
+  for (const holding of player.stocks) {
+    const quote = market.find((item) => item.id === holding.stockId)
+    if (!quote) continue
+    const dividend = Math.round(holding.quantity * quote.price * quote.dividendYield / 12)
+    holding.cumulativeDividends = Math.max(0, Math.round((holding.cumulativeDividends ?? 0) + dividend))
+  }
+  for (const loan of player.loans) {
+    if (!loan.relatedStockId || loan.balance <= 0) continue
+    const holding = player.stocks.find((item) => item.stockId === loan.relatedStockId)
+    if (!holding) continue
+    const principalReduction = Math.min(loan.balance, Math.round(loan.monthlyPayment * 0.72))
+    const financingCost = Math.max(0, loan.monthlyPayment - principalReduction)
+    holding.cumulativeFinancingCosts = Math.max(0, Math.round((holding.cumulativeFinancingCosts ?? 0) + financingCost))
+  }
+}
+
 const settleMonth = (state: GameState) => {
   const nextMonth = state.month + 1
   const resaleReturns = state.players.map((player) => player.status === 'active' ? settleResales(state, player, nextMonth) : 0)
@@ -389,6 +411,7 @@ const settleMonth = (state: GameState) => {
   state.players.forEach((player) => { if (player.status === 'active') processAssetRisks(state, player) })
   resolveEventChains(state, nextMonth, () => random(state), (title, description, tone = 'neutral') => addEvent(state, title, description, tone))
   state.players.forEach((player) => { if (player.status === 'active') recordMonthlyAssetReturns(player) })
+  state.players.forEach((player) => { if (player.status === 'active') recordMonthlyStockReturns(player, state.stockMarket) })
   const humanReport = createMonthlyReport(state.players[0], state.month, state.stockMarket, resaleReturns[0], contractReturns[0])
   state.players.forEach((player, index) => {
     if (player.status !== 'active') return
@@ -407,6 +430,7 @@ const settleMonth = (state: GameState) => {
   state.month = nextMonth
   state.day = 1
   updateGlobalEvent(state, () => random(state))
+  clampFinalStockMoves(state)
   processAssetListings(state, () => random(state))
   state.activeMarginCall = createStockMarginCall(state.players[0], state.stockMarket)
   refreshRivalIntents(state)
@@ -1074,7 +1098,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
         const assessment = assessLoan(player, gap, state.difficulty, collateral, 0, 0, state.globalEvent?.creditRateDelta ?? 0)
         if (!assessment.approved) return reject(current, assessment.reason)
         player.cash += gap
-        player.loans.push({ id: uid(state, 'stock-buy-loan'), name: collateral ? `Акции под залог: ${collateral.name}` : `Кредит на акции ${quote.ticker}`, balance: gap, monthlyPayment: assessment.monthlyPayment, annualRate: assessment.annualRate, termMonths: assessment.termMonths, collateralAssetId: collateral?.id, missedPayments: 0 })
+        player.loans.push({ id: uid(state, 'stock-buy-loan'), name: collateral ? `Акции под залог: ${collateral.name}` : `Кредит на акции ${quote.ticker}`, balance: gap, monthlyPayment: assessment.monthlyPayment, annualRate: assessment.annualRate, termMonths: assessment.termMonths, collateralAssetId: collateral?.id, relatedStockId: quote.id, missedPayments: 0 })
       }
       player.cash -= total
       holding = player.stocks.find((item) => item.stockId === quote.id)
@@ -1098,6 +1122,8 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
         marketCostBasis: grossPurchase,
         purchaseFees: purchaseFee,
         pledgedQuantity: 0,
+        cumulativeDividends: 0,
+        cumulativeFinancingCosts: 0,
       })
       addEvent(state, 'Акции куплены', `${quote.ticker}: ${command.quantity} шт. за ${total.toLocaleString('ru-RU')} ₽`)
     } else {
@@ -1114,6 +1140,9 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
       holding.costBasis = Math.max(0, totalCostBasis - soldCostBasis)
       holding.marketCostBasis = Math.max(0, totalMarketCostBasis - soldMarketCostBasis)
       holding.purchaseFees = Math.max(0, holding.costBasis - holding.marketCostBasis)
+      const remainingRatio = holding.quantity / quantityBeforeSale
+      holding.cumulativeDividends = Math.max(0, Math.round((holding.cumulativeDividends ?? 0) * remainingRatio))
+      holding.cumulativeFinancingCosts = Math.max(0, Math.round((holding.cumulativeFinancingCosts ?? 0) * remainingRatio))
       if (holding.quantity === 0) player.stocks = player.stocks.filter((item) => item.stockId !== quote.id)
       else {
         holding.averagePrice = Math.round(holding.costBasis / holding.quantity)

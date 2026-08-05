@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { GameState } from '../domain/types'
 
 const saveSchema = z.object({
-  version: z.literal(11),
+  version: z.literal(12),
   seed: z.number().int().nonnegative(),
   phase: z.enum(['setup', 'ready', 'decision', 'finished']),
   day: z.number().int().min(1).max(30),
@@ -40,7 +40,7 @@ const saveSchema = z.object({
   outcome: z.object({ winnerId: z.string().nullable(), reason: z.enum(['freedom', 'human-bankrupt', 'last-solvent']) }).nullable(),
 })
 
-export const SAVE_KEY = 'vyhod-iz-kruga-save-v11-v16'
+export const SAVE_KEY = 'vyhod-iz-kruga-save-v12-v17'
 
 export const saveGame = (state: GameState) => localStorage.setItem(SAVE_KEY, JSON.stringify(state))
 

@@ -135,6 +135,10 @@ export const globalEvents = [
   { id: 'consumer-slowdown', title: 'Покупатели экономят', description: 'Ритейл и общепит проседают на два месяца.', category: 'Общепит', sector: 'Ритейл', revenueMultiplier: 0.82, stockImpact: -0.26, creditRateDelta: 0, duration: 2 },
   { id: 'property-demand', title: 'Спрос на аренду вырос', description: 'Недвижимость получает больше дохода три месяца.', category: 'Недвижимость', sector: 'Финансы', revenueMultiplier: 1.12, stockImpact: 0.08, creditRateDelta: 0, duration: 3 },
   { id: 'energy-shock', title: 'Энергетический шок', description: 'Энергетика резко меняется, а расходы бизнеса растут.', category: 'Производство', sector: 'Энергетика', revenueMultiplier: 0.86, stockImpact: -0.34, creditRateDelta: 0.01, duration: 2 },
+  { id: 'energy-recovery', title: 'Энергетический рынок восстановился', description: 'Экспорт и цены поддержали энергетические компании.', category: 'Производство', sector: 'Энергетика', revenueMultiplier: 1.08, stockImpact: 0.28, creditRateDelta: 0, duration: 2 },
+  { id: 'tech-correction', title: 'Коррекция технологического сектора', description: 'Инвесторы фиксируют прибыль после сильного роста.', category: 'IT', sector: 'Технологии', revenueMultiplier: 0.94, stockImpact: -0.24, creditRateDelta: 0, duration: 2 },
+  { id: 'biotech-breakthrough', title: 'Прорыв в биотехнологиях', description: 'Успешные испытания резко повышают интерес к сектору.', category: 'Медицина', sector: 'Биотех', revenueMultiplier: 1.1, stockImpact: 0.24, creditRateDelta: 0, duration: 2 },
+  { id: 'biotech-regulation', title: 'Ужесточение правил для биотеха', description: 'Новые требования задерживают запуск препаратов.', category: 'Медицина', sector: 'Биотех', revenueMultiplier: 0.92, stockImpact: -0.24, creditRateDelta: 0, duration: 2 },
 ] as const
 
 export const initialStockMarket: StockQuote[] = [

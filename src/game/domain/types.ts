@@ -121,6 +121,7 @@ export interface Loan {
   collateralStockId?: string
   collateralStockQuantity?: number
   relatedAssetId?: string
+  relatedStockId?: string
   missedPayments?: number
 }
 
@@ -143,6 +144,8 @@ export interface StockHolding {
   marketCostBasis?: number
   purchaseFees?: number
   pledgedQuantity?: number
+  cumulativeDividends?: number
+  cumulativeFinancingCosts?: number
 }
 
 export interface ResaleDeal {
@@ -305,7 +308,7 @@ export interface RecentCards {
 }
 
 export interface GameState {
-  version: 11
+  version: 12
   seed: number
   phase: Phase
   day: number
