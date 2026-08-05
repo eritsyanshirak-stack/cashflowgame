@@ -247,6 +247,7 @@ export interface BuyerOffer {
   expiresMonth: number
   archetype?: BuyerArchetype
   buyerPlayerId?: string
+  sellerApprovalRequired?: boolean
 }
 
 export interface MarginCall {
@@ -260,11 +261,11 @@ export interface MarginCall {
 
 export type Decision =
   | { kind: 'business'; businessId: string; askingPrice: number; originalAskingPrice?: number; negotiated: boolean; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean; profile?: DealProfile; revealedFacts?: string[]; sellerCounter?: SellerCounter; sellerTerm?: SellerCounter['term'] }
-  | { kind: 'opportunity'; opportunityId: string; businessId: string; askingPrice: number; originalAskingPrice?: number; title: string; description: string; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean; profile?: DealProfile; revealedFacts?: string[]; sellerCounter?: SellerCounter; sellerTerm?: SellerCounter['term'] }
+  | { kind: 'opportunity'; opportunityId: string; businessId: string; askingPrice: number; originalAskingPrice?: number; title: string; description: string; negotiated?: boolean; negotiationNote?: string; inspection?: DueDiligence; hiddenIssue?: BusinessIssue; issueRevealed?: boolean; profile?: DealProfile; revealedFacts?: string[]; sellerCounter?: SellerCounter; sellerTerm?: SellerCounter['term'] }
   | { kind: 'expense'; title: string; amount: number; options?: ExpenseOption[] }
   | { kind: 'chance'; title: string; investment: number; minReturn: number; maxReturn: number; durationMonths: number }
   | { kind: 'contract'; title: string; description: string; options: ContractOption[] }
-  | { kind: 'auction'; businessId: string; title: string; currentBid: number; marketValue: number; minimumStep: number; inspected: boolean; issue?: BusinessIssue; issueRevealed?: boolean; botCeilings: number[]; leadingBot: number | null }
+  | { kind: 'auction'; businessId: string; title: string; currentBid: number; marketValue: number; minimumStep: number; inspected: boolean; issue?: BusinessIssue; issueRevealed?: boolean; botCeilings: number[]; botActive?: boolean[]; botDropChances?: number[]; bidRound?: number; lastAuctionNote?: string; leadingBot: number | null }
   | { kind: 'partnership'; businessId: string; title: string; description: string; discount: number; originalDiscount: number; partnerName: string; negotiated?: boolean; negotiationSucceeded?: boolean; negotiationNote?: string }
   | { kind: 'management' }
   | { kind: 'market'; title: string; description: string }

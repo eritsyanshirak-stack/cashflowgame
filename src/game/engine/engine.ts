@@ -117,12 +117,28 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
     const business = pickFresh(state, 'business', unlocked, (item) => item.id, () => random(state), 4)
     const marketValue = business.price
     const minimumStep = Math.max(10_000, Math.round(marketValue * 0.05 / 10_000) * 10_000)
+    const botCeilings: number[] = []
+    const botActive: boolean[] = []
+    const botDropChances: number[] = []
+    for (const bot of state.players.slice(1)) {
+      const joinChance = bot.botStrategy === 'aggressive' ? 0.78 : bot.botStrategy === 'careful' ? 0.38 : 0.58
+      const reserve = bot.baseExpenses * (bot.botStrategy === 'careful' ? 1.4 : 0.55)
+      const canAffordToCompete = bot.cash >= reserve + marketValue * 0.08
+      const joined = bot.status === 'active' && random(state) < joinChance * (canAffordToCompete ? 1 : 0.45)
+      botActive.push(joined)
+      botDropChances.push(bot.botStrategy === 'aggressive' ? 0.12 + random(state) * 0.12 : bot.botStrategy === 'careful' ? 0.34 + random(state) * 0.2 : 0.22 + random(state) * 0.16)
+      botCeilings.push(joined
+        ? Math.round(marketValue * (0.76 + random(state) * (bot.botStrategy === 'aggressive' ? 0.38 : bot.botStrategy === 'careful' ? 0.2 : 0.29)) / 10_000) * 10_000
+        : 0)
+    }
+    const joinedCount = botActive.filter(Boolean).length
     return {
       kind: 'auction', businessId: business.id, title: business.name,
       currentBid: Math.round(marketValue * 0.65 / 10_000) * 10_000,
       marketValue, minimumStep, inspected: false,
       issue: rollIssue(state, business.riskRating, 0.08), issueRevealed: false,
-      botCeilings: state.players.slice(1).map((bot) => Math.round(marketValue * (0.76 + random(state) * (bot.botStrategy === 'aggressive' ? 0.38 : bot.botStrategy === 'careful' ? 0.2 : 0.29)) / 10_000) * 10_000),
+      botCeilings, botActive, botDropChances, bidRound: 0,
+      lastAuctionNote: joinedCount > 0 ? `В торги вошли соперники: ${joinedCount}. Они могут выйти на любой ставке.` : 'Соперники пока не вошли в торги. Объект можно забрать по стартовой цене.',
       leadingBot: null,
     }
   }
@@ -147,7 +163,7 @@ const decisionForCell = (state: GameState, type: (typeof board)[number]['type'])
       const askingPrice = Math.round(business.price * deal.discount * profile.valueMultiplier / 10_000) * 10_000
       return {
         kind: 'opportunity', opportunityId: deal.id, businessId: business.id,
-        askingPrice, originalAskingPrice: askingPrice, title: deal.title, description: deal.description,
+        askingPrice, originalAskingPrice: askingPrice, title: deal.title, description: deal.description, negotiated: false,
         inspection: 'none', hiddenIssue: rollIssue(state, business.riskRating, deal.issueChance * 0.45), issueRevealed: false, profile, revealedFacts: [],
       }
     }
@@ -876,23 +892,25 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
   }
 
   if (command.type === 'NEGOTIATE_BUSINESS') {
-    if (decision.kind !== 'business') return reject(current, 'Сейчас нет сделки для торга')
+    if (decision.kind !== 'business' && decision.kind !== 'opportunity') return reject(current, 'Сейчас нет сделки для торга')
     if (decision.negotiated) return reject(current, 'Ты уже сделал предложение')
     const settings = difficultySettings[state.difficulty]
+    const rareOpportunityPenalty = decision.kind === 'opportunity' ? 0.08 : 0
     const boldnessPenalty = command.offerPercent === 0.85 ? 0.28 : command.offerPercent === 0.9 ? 0.13 : 0
-    const successChance = settings.negotiationChance + skillLevel(player, 'negotiation') * 0.07 + negotiationSpecializationBonus(player) - boldnessPenalty
+    const successChance = settings.negotiationChance + skillLevel(player, 'negotiation') * 0.07 + negotiationSpecializationBonus(player) - boldnessPenalty - rareOpportunityPenalty
     const success = random(state) < successChance
     decision.negotiated = true
     if (success) {
       decision.askingPrice = Math.round(decision.askingPrice * command.offerPercent)
       decision.negotiationNote = `Продавец согласился на скидку ${Math.round((1 - command.offerPercent) * 100)}%`
-      addEvent(state, 'Торг удался', decision.negotiationNote, 'good')
-      awardProgress(state, player, 24, 'negotiation', 14)
+      addEvent(state, decision.kind === 'opportunity' ? 'Торг по редкой возможности удался' : 'Торг удался', decision.negotiationNote, 'good')
+      awardProgress(state, player, decision.kind === 'opportunity' ? 32 : 24, 'negotiation', decision.kind === 'opportunity' ? 18 : 14)
       return { state, accepted: true }
     }
-    const dealLost = random(state) < (command.offerPercent === 0.85 ? 0.34 : command.offerPercent === 0.9 ? 0.16 : 0.05)
+    const baseLossChance = command.offerPercent === 0.85 ? 0.34 : command.offerPercent === 0.9 ? 0.16 : 0.05
+    const dealLost = random(state) < Math.min(0.78, baseLossChance + (decision.kind === 'opportunity' ? 0.14 : 0))
     if (dealLost) {
-      addEvent(state, 'Сделка сорвалась', 'Продавец отказался продолжать переговоры.', 'bad')
+      addEvent(state, 'Сделка сорвалась', decision.kind === 'opportunity' ? 'Редкая возможность ушла другому покупателю после слишком жёсткого торга.' : 'Продавец отказался продолжать переговоры.', 'bad')
       completeHumanTurn(state)
     } else {
       decision.sellerCounter = createSellerCounter(decision.askingPrice, command.offerPercent, skillLevel(player, 'negotiation'), () => random(state))

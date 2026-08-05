@@ -62,7 +62,11 @@ const respondToBuyer = (state: GameState, offerId: string, action: BuyerOfferAct
   const requestedPrice = Math.round(offer.offeredPrice * premium)
   const result = negotiateBuyerOffer(offer, requestedPrice, skillLevel(player, 'negotiation'), random, buyerNegotiationSpecializationBonus(player))
   if (result.kind === 'accepted') {
-    sellAssetAtPrice(state, player, asset.id, result.price, 'Покупатель принял контроффер')
+    offer.offeredPrice = result.price
+    offer.round = 2
+    offer.final = true
+    offer.sellerApprovalRequired = true
+    pushSystemEvent(state, 'Покупатель принял твой контроффер', `${asset.name}: покупатель согласен на ${result.price.toLocaleString('ru-RU')} ₽. Сделка не закрыта — подтверди продажу.`, 'good')
     return accepted()
   }
   if (result.kind === 'walk') {
@@ -73,6 +77,7 @@ const respondToBuyer = (state: GameState, offerId: string, action: BuyerOfferAct
   offer.offeredPrice = result.price
   offer.round = 2
   offer.final = true
+  offer.sellerApprovalRequired = false
   pushSystemEvent(state, 'Финальное предложение покупателя', `${asset.name}: ${result.price.toLocaleString('ru-RU')} ₽.`, 'neutral')
   return accepted()
 }
@@ -247,18 +252,54 @@ export const handleDecisionV14Command = (state: GameState, command: GameCommand,
     return accepted()
   }
   if (command.type === 'AUCTION_BID' && decision.kind === 'auction') {
-    if (command.amount < decision.currentBid + decision.minimumStep) return rejected('Ставка слишком мала')
-    const highestBot = Math.max(0, ...decision.botCeilings)
-    if (command.amount > highestBot) {
+    const active = [...(decision.botActive ?? decision.botCeilings.map((ceiling) => ceiling > 0))]
+    const dropChances = decision.botDropChances ?? decision.botCeilings.map(() => 0.24)
+    const activeBeforeBid = active.some(Boolean)
+    const minimumAllowed = activeBeforeBid ? decision.currentBid + decision.minimumStep : decision.currentBid
+    if (command.amount < minimumAllowed) return rejected('Ставка слишком мала')
+
+    const round = (decision.bidRound ?? 0) + 1
+    decision.bidRound = round
+    const dropped: number[] = []
+    for (let index = 0; index < active.length; index += 1) {
+      if (!active[index]) continue
+      const ceiling = decision.botCeilings[index] ?? 0
+      if (ceiling < command.amount + decision.minimumStep) {
+        active[index] = false
+        dropped.push(index)
+        continue
+      }
+      const pressure = command.amount / Math.max(1, ceiling)
+      const exitChance = Math.min(0.9, (dropChances[index] ?? 0.24) + Math.max(0, pressure - 0.62) * 0.72 + Math.max(0, round - 1) * 0.06)
+      if (random() < exitChance) {
+        active[index] = false
+        dropped.push(index)
+      }
+    }
+    decision.botActive = active
+
+    const eligible = decision.botCeilings
+      .map((ceiling, index) => ({ ceiling, index }))
+      .filter((item) => active[item.index] && item.ceiling >= command.amount + decision.minimumStep)
+
+    if (eligible.length === 0) {
       state.pendingDecision = { kind: 'business', businessId: decision.businessId, askingPrice: command.amount, negotiated: true, negotiationNote: 'Победа на аукционе', inspection: decision.inspected ? 'basic' : 'none', hiddenIssue: decision.issue, issueRevealed: decision.issueRevealed }
-      pushSystemEvent(state, 'Ты выиграл аукцион', `Финальная цена ${command.amount.toLocaleString('ru-RU')} ₽. Теперь собери финансирование.`, 'good')
+      const exitNote = activeBeforeBid ? (dropped.length > 0 ? 'Соперники вышли после твоей ставки.' : 'Никто не перебил твою ставку.') : 'Ни один соперник не вошёл в торги.'
+      pushSystemEvent(state, 'Ты выиграл аукцион', `${exitNote} Финальная цена ${command.amount.toLocaleString('ru-RU')} ₽. Теперь собери финансирование.`, 'good')
       return accepted()
     }
-    const eligible = decision.botCeilings.map((ceiling, index) => ({ ceiling, index })).filter((item) => item.ceiling >= command.amount + decision.minimumStep)
-    const bot = eligible[Math.floor(random() * eligible.length)] ?? { ceiling: highestBot, index: decision.botCeilings.indexOf(highestBot) }
-    decision.currentBid = Math.min(bot.ceiling, command.amount + decision.minimumStep)
-    decision.leadingBot = bot.index
-    pushSystemEvent(state, 'Соперник перебил ставку', `Новая цена ${decision.currentBid.toLocaleString('ru-RU')} ₽.`, 'neutral')
+
+    const selected = eligible[Math.floor(random() * eligible.length)]
+    const botPlayer = state.players[selected.index + 1]
+    const maxSteps = botPlayer?.botStrategy === 'aggressive' ? 3 : botPlayer?.botStrategy === 'careful' ? 2 : 2
+    const requestedSteps = 1 + Math.floor(random() * maxSteps)
+    const maximumSteps = Math.max(1, Math.floor((selected.ceiling - command.amount) / decision.minimumStep))
+    const steps = Math.min(requestedSteps, maximumSteps)
+    decision.currentBid = command.amount + decision.minimumStep * steps
+    decision.leadingBot = selected.index
+    const droppedNames = dropped.map((index) => state.players[index + 1]?.name).filter(Boolean)
+    decision.lastAuctionNote = `${botPlayer?.name ?? 'Соперник'} поднял ставку на ${steps} ${steps === 1 ? 'шаг' : 'шага'}${droppedNames.length ? `. Вышли: ${droppedNames.join(', ')}` : ''}.`
+    pushSystemEvent(state, 'Соперник перебил ставку', `${decision.lastAuctionNote} Новая цена ${decision.currentBid.toLocaleString('ru-RU')} ₽.`, 'neutral')
     return accepted()
   }
   if (command.type === 'AUCTION_WITHDRAW' && decision.kind === 'auction') return accepted(true)

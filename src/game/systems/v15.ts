@@ -297,7 +297,10 @@ export const buyerOfferMultiplier = (asset: Asset, archetype: BuyerArchetype, ra
   if (archetype === 'strategic') return 1.01 + asset.developmentLevel * 0.025 + random() * 0.08
   if (archetype === 'management') return 0.96 + (asset.riskRating === 'low' ? 0.07 : 0) + random() * 0.05
   if (archetype === 'urgent') return 0.89 + random() * 0.08
-  return 0.84 + random() * 0.11
+  const mood = random()
+  if (mood < 0.22) return 1.02 + random() * 0.1
+  if (mood < 0.66) return 0.93 + random() * 0.1
+  return 0.84 + random() * 0.1
 }
 
 export const specializationNames: Record<Specialization, string> = {

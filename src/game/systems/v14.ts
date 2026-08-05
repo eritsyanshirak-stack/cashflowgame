@@ -125,7 +125,8 @@ export const processAssetListings = (state: GameState, random: () => number) => 
     const fullPriceChance = ratio <= 1 ? 0.7 : ratio <= 1.1 ? 0.38 : ratio <= 1.2 ? 0.17 : 0.05
     const acceptsAsking = random() < fullPriceChance && archetype !== 'speculator'
     const archetypePrice = Math.round(marketValue * buyerOfferMultiplier(asset, archetype, random))
-    const offeredPrice = acceptsAsking ? asset.listingPrice : Math.min(asset.listingPrice, archetypePrice)
+    const offerCap = archetype === 'speculator' ? Math.round(asset.listingPrice * 1.08) : asset.listingPrice
+    const offeredPrice = acceptsAsking ? asset.listingPrice : Math.min(offerCap, archetypePrice)
     const offer: BuyerOffer = {
       id: eventId(state, `offer-${asset.id}`),
       assetId: asset.id,
@@ -157,11 +158,12 @@ export const negotiateBuyerOffer = (
 ): BuyerNegotiationResult => {
   const requestedPremium = requestedPrice / Math.max(1, offer.marketValue) - 1
   const jump = requestedPrice / Math.max(1, offer.offeredPrice) - 1
-  const acceptanceChance = Math.max(0.07, Math.min(0.94, 0.68 + negotiationLevel * 0.06 + specializationBonus - requestedPremium * 1.55 - jump * 1.8))
+  const temperament = offer.archetype === 'strategic' ? 0.08 : offer.archetype === 'management' ? 0.03 : offer.archetype === 'urgent' ? -0.02 : offer.archetype === 'speculator' ? -0.07 : 0
+  const acceptanceChance = Math.max(0.07, Math.min(0.94, 0.68 + negotiationLevel * 0.06 + specializationBonus + temperament - requestedPremium * 1.55 - jump * 1.8))
   if (random() < acceptanceChance) return { kind: 'accepted', price: requestedPrice }
   if (offer.final || random() < 0.42 + Math.max(0, requestedPremium) * 0.35) return { kind: 'walk' }
   const floor = Math.max(offer.offeredPrice, Math.round(offer.marketValue * 0.9))
-  const ceiling = Math.min(requestedPrice, offer.askingPrice)
+  const ceiling = Math.max(floor, Math.min(requestedPrice, Math.max(offer.askingPrice, Math.round(offer.offeredPrice * 1.08))))
   const counter = Math.round(floor + (ceiling - floor) * (0.28 + random() * 0.34))
   return { kind: 'counter', price: Math.max(floor, counter) }
 }
