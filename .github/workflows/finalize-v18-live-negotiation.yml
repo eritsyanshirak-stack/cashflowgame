@@ -19,6 +19,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: python scripts/apply_v18_live_negotiation.py
+      - run: python scripts/fix_v18_test_types.py
       - run: npm ci
       - run: npm test
       - run: npm run lint
@@ -30,7 +31,7 @@ jobs:
           cp -R dist/. /tmp/cashflow-v18-preview/
       - name: Commit verified source
         run: |
-          rm -f scripts/apply_v18_live_negotiation.py .github/workflows/finalize-v18-live-negotiation.yml
+          rm -f scripts/apply_v18_live_negotiation.py scripts/fix_v18_test_types.py .github/workflows/finalize-v18-live-negotiation.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
