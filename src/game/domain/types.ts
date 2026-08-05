@@ -104,6 +104,10 @@ export interface Asset extends BusinessTemplate {
   warrantyUntilMonth?: number | null
   purchaseCashContribution?: number
   cashInvested?: number
+  lifetimeCashInvested?: number
+  cashReturned?: number
+  cumulativeNetCashflow?: number
+  partnerName?: string
 }
 
 export interface Loan {

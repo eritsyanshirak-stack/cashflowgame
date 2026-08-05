@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { businesses } from '../content/content'
-import type { Asset } from '../domain/types'
-import { assetMarketValue, loanPayment } from '../systems/economy'
+import type { Asset, DealProfile } from '../domain/types'
+import { assetCashflow, assetMarketValue, loanPayment } from '../systems/economy'
 import { calculateStockSale, STOCK_COMMISSION_RATE, stockPurchaseTotal, stockSaleProceeds } from '../systems/stockSale'
 import { assetInvestmentBasis, calculateAssetSaleSummary, calculatePartnershipTerms } from '../systems/v16'
 import { emptyGame, executeCommand } from './engine'
@@ -77,6 +77,7 @@ describe('Balance v1.6 clarity and partnership', () => {
     expect(accepted.state.players[0].assets[0].ownership).toBe(0.7)
     expect(accepted.state.players[0].assets[0].purchaseCashContribution).toBe(terms.playerCashNeeded)
     expect(accepted.state.players[0].assets[0].cashInvested).toBe(terms.playerCashNeeded)
+    expect(accepted.state.players[0].assets[0].partnerName).toBe('Марина')
   })
 
   it('tracks own cash in a business and adds development spending', () => {
@@ -175,4 +176,143 @@ describe('Balance v1.6 clarity and partnership', () => {
     expect(sold.state.players[0].stocks[0].quantity).toBe(76)
     expect(sold.state.players[0].stocks[0].costBasis).toBe(originalBasis - Math.round(originalBasis / 2))
   })
+
+  it('keeps the unique deal profile and negotiated seller protection after purchase', () => {
+    const game = startedGame()
+    const profile: DealProfile = {
+      id: 'profile-audit',
+      location: 'У метро',
+      leaseMonths: 18,
+      equipmentCondition: 'fair',
+      equipmentLabel: 'Рабочее оборудование',
+      ownerDependency: 'medium',
+      ownerDependencyLabel: 'Часть клиентов держится на владельце',
+      customerRating: 4.6,
+      sellerReason: 'Переезд',
+      revenueMultiplier: 1.18,
+      costMultiplier: 0.91,
+      valueMultiplier: 1.05,
+      declaredRevenue: 52_000,
+      declaredCosts: 31_000,
+    }
+    game.phase = 'decision'
+    game.players[0].cash = 1_000_000
+    game.pendingDecision = {
+      kind: 'business', businessId: 'coffee', askingPrice: 480_000,
+      originalAskingPrice: 480_000, negotiated: true, inspection: 'full', hiddenIssue: 'none', issueRevealed: true,
+      profile, revealedFacts: [], sellerTerm: 'warranty',
+    }
+
+    const bought = executeCommand(game, { type: 'BUY_BUSINESS', funding: 'cash' })
+    expect(bought.accepted).toBe(true)
+    const asset = bought.state.players[0].assets[0]
+    expect(asset.dealProfile?.id).toBe(profile.id)
+    expect(asset.warrantyUntilMonth).toBe(asset.purchaseMonth + 3)
+    expect(asset.revenue).not.toBe(businesses.find((item) => item.id === 'coffee')!.revenue)
+  })
+
+  it('keeps the unique profile for a rare opportunity too', () => {
+    const game = startedGame()
+    const profile: DealProfile = {
+      id: 'rare-profile-audit',
+      location: 'Спальный район',
+      leaseMonths: 12,
+      equipmentCondition: 'good',
+      equipmentLabel: 'Хорошее состояние',
+      ownerDependency: 'low',
+      ownerDependencyLabel: 'Команда работает самостоятельно',
+      customerRating: 4.4,
+      sellerReason: 'Смена направления',
+      revenueMultiplier: 0.96,
+      costMultiplier: 1.08,
+      valueMultiplier: 0.92,
+      declaredRevenue: 48_000,
+      declaredCosts: 32_000,
+    }
+    game.phase = 'decision'
+    game.players[0].cash = 1_000_000
+    game.pendingDecision = {
+      kind: 'opportunity', opportunityId: 'distressed-coffee', businessId: 'coffee',
+      askingPrice: 326_000, originalAskingPrice: 326_000, title: 'Кофейня ниже рынка', description: 'Тест',
+      inspection: 'full', hiddenIssue: 'none', issueRevealed: true, profile, revealedFacts: [], sellerTerm: 'transition',
+    }
+
+    const bought = executeCommand(game, { type: 'BUY_OPPORTUNITY', funding: 'cash' })
+    expect(bought.accepted).toBe(true)
+    const asset = bought.state.players[0].assets[0]
+    expect(asset.dealProfile?.id).toBe(profile.id)
+    expect(asset.transitionSupportUntilMonth).toBe(asset.purchaseMonth + 2)
+  })
+
+  it('does not double-count development for assets without the new investment fields', () => {
+    const game = startedGame()
+    const asset = testAsset()
+    delete asset.cashInvested
+    delete asset.lifetimeCashInvested
+    asset.totalDevelopmentCost = 10_000
+    game.players[0].assets = [asset]
+    game.players[0].cash = 1_000_000
+    game.phase = 'ready'
+    const before = asset.downPayment + asset.totalDevelopmentCost
+
+    const developed = executeCommand(game, { type: 'DEVELOP_ASSET', assetId: asset.id, developmentId: 'marketing' })
+    expect(developed.accepted).toBe(true)
+    const after = developed.state.players[0].assets[0]
+    expect(assetInvestmentBasis(after)).toBe(before + (after.totalDevelopmentCost - 10_000))
+    expect(after.lifetimeCashInvested).toBe(assetInvestmentBasis(after))
+  })
+
+  it('includes prior net cashflow in the total ownership result but shows sale-only result separately', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const asset = testAsset()
+    asset.cumulativeNetCashflow = 50_000
+    player.assets = [asset]
+
+    const summary = calculateAssetSaleSummary(player, asset)
+    expect(summary.marketPositionProfit).toBe(135_000)
+    expect(summary.marketProfit).toBe(185_000)
+    expect(summary.cumulativeNetCashflow).toBe(50_000)
+  })
+
+  it('treats an underwater sale deficiency as debt, not as free disappearance', () => {
+    const game = startedGame()
+    const player = game.players[0]
+    const asset = testAsset()
+    asset.marketValue = 300_000
+    asset.loan = 400_000
+    asset.cashInvested = 100_000
+    asset.lifetimeCashInvested = 100_000
+    player.assets = [asset]
+
+    const summary = calculateAssetSaleSummary(player, asset)
+    expect(summary.marketProceeds).toBe(0)
+    expect(summary.marketDeficiency).toBe(100_000)
+    expect(summary.marketPositionProfit).toBe(-200_000)
+    expect(summary.marketProfit).toBe(-200_000)
+  })
+
+  it('records the asset net cashflow each closed month including its acquisition-loan payment', () => {
+    let game = startedGame()
+    const player = game.players[0]
+    const asset = testAsset()
+    asset.insuredUntilMonth = 99
+    asset.cumulativeNetCashflow = 0
+    player.assets = [asset]
+    player.loans = [{
+      id: 'related-loan', name: 'Кредит на взнос', balance: 60_000, monthlyPayment: 5_000,
+      annualRate: 0.2, termMonths: 24, relatedAssetId: asset.id,
+    }]
+    const expected = assetCashflow(asset) - 5_000
+
+    for (let turn = 0; turn < 7; turn += 1) {
+      game.phase = 'decision'
+      game.pendingDecision = { kind: 'salary' }
+      game = executeCommand(game, { type: 'SKIP_DECISION' }).state
+    }
+
+    expect(game.month).toBe(2)
+    expect(game.players[0].assets[0].cumulativeNetCashflow).toBe(expected)
+  })
+
 })

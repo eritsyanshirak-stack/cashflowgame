@@ -71,30 +71,40 @@ export function AssetInvestmentPanel({ player, asset }: { player: Player; asset:
   const summary = calculateAssetSaleSummary(player, asset)
   const marketTone = summary.marketProfit >= 0 ? 'good' : 'bad'
   const quickTone = summary.quickProfit >= 0 ? 'good' : 'bad'
+  const flowTone = summary.cumulativeNetCashflow >= 0 ? 'good' : 'bad'
 
   return <details className="v16-asset-money" open>
-    <summary><span>Деньги в этом активе</span><strong className={marketTone}>{summary.marketProfit >= 0 ? '+' : ''}{money(summary.marketProfit)} по рынку</strong></summary>
+    <summary><span>Деньги в этом активе</span><strong className={marketTone}>{summary.marketProfit >= 0 ? '+' : ''}{money(summary.marketProfit)} итог при продаже</strong></summary>
     <div className="v16-money-grid">
-      <span>Первый взнос <b>{money(asset.purchaseCashContribution ?? asset.downPayment)}</b></span>
-      <span>Развитие и решения <b>{money(Math.max(0, summary.invested - (asset.purchaseCashContribution ?? asset.downPayment)))}</b></span>
-      <span>Всего своих денег <b>{money(summary.invested)}</b></span>
-      <span>Кредит на первоначальный взнос <b className={summary.relatedAcquisitionDebt > 0 ? 'bad' : ''}>{money(summary.relatedAcquisitionDebt)}</b></span>
+      <span>Первый взнос своими <b>{money(asset.purchaseCashContribution ?? asset.downPayment)}</b></span>
+      <span>Вложено в текущую долю <b>{money(summary.invested)}</b></span>
+      <span>Всего вложено за всё время <b>{money(summary.lifetimeInvested)}</b></span>
+      <span>Уже возвращено продажей долей <b className={summary.cashReturned > 0 ? 'good' : ''}>{money(summary.cashReturned)}</b></span>
+      <span>Чистый поток получен за всё время <b className={flowTone}>{summary.cumulativeNetCashflow >= 0 ? '+' : ''}{money(summary.cumulativeNetCashflow)}</b></span>
+      <span>Кредит на первый взнос ещё остался <b className={summary.relatedAcquisitionDebt > 0 ? 'bad' : ''}>{money(summary.relatedAcquisitionDebt)}</b></span>
       <span>Текущий поток <b className={assetCashflow(asset) >= 0 ? 'good' : 'bad'}>{money(assetCashflow(asset))}/мес.</b></span>
+      {asset.partnerName && <span>Партнёр <b>{asset.partnerName} · {Math.round((1 - asset.ownership) * 100)}%</b></span>}
     </div>
+    <div className="v16-return-note">Итог владения учитывает все твои вложения, уже полученный поток, проданные доли, долги и возможный остаточный долг после продажи.</div>
     <div className="v16-sale-comparison">
       <div>
         <small>ПРОДАТЬ ПО РЫНКУ</small>
         <b>{money(summary.marketValue)}</b>
-        <span>После банков: {money(summary.marketProceeds)}</span>
-        <strong className={marketTone}>{summary.marketProfit >= 0 ? 'Прибыль ' : 'Убыток '}{money(Math.abs(summary.marketProfit))} · {percent(summary.marketProfitPercent)}</strong>
+        <span>На руки сейчас: {money(summary.marketProceeds)}</span>
+        {summary.marketDeficiency > 0 && <span className="bad">Останется долг: {money(summary.marketDeficiency)}</span>}
+        <span>Только результат продажи: <b className={summary.marketPositionProfit >= 0 ? 'good' : 'bad'}>{summary.marketPositionProfit >= 0 ? '+' : ''}{money(summary.marketPositionProfit)}</b></span>
+        <strong className={marketTone}>Итог владения: {summary.marketProfit >= 0 ? '+' : ''}{money(summary.marketProfit)} · {percent(summary.marketProfitPercent)}</strong>
       </div>
       <div>
         <small>ПРОДАТЬ СРОЧНО</small>
         <b>{money(summary.quickPrice)}</b>
-        <span>После банков: {money(summary.quickProceeds)}</span>
-        <strong className={quickTone}>{summary.quickProfit >= 0 ? 'Прибыль ' : 'Убыток '}{money(Math.abs(summary.quickProfit))} · {percent(summary.quickProfitPercent)}</strong>
+        <span>На руки сейчас: {money(summary.quickProceeds)}</span>
+        {summary.quickDeficiency > 0 && <span className="bad">Останется долг: {money(summary.quickDeficiency)}</span>}
+        <span>Только результат продажи: <b className={summary.quickPositionProfit >= 0 ? 'good' : 'bad'}>{summary.quickPositionProfit >= 0 ? '+' : ''}{money(summary.quickPositionProfit)}</b></span>
+        <strong className={quickTone}>Итог владения: {summary.quickProfit >= 0 ? '+' : ''}{money(summary.quickProfit)} · {percent(summary.quickProfitPercent)}</strong>
       </div>
     </div>
-    <div className="v16-break-even"><span>Цена продажи без убытка</span><b>{money(summary.breakEvenGrossPrice)}</b><small>С учётом долга бизнеса, залога, отдельного кредита на первый взнос и твоих денег в активе.</small></div>
+    <div className="v16-break-even"><span>Цена для общего результата в ноль</span><b>{money(summary.breakEvenGrossPrice)}</b><small>Учитывает весь полученный поток и деньги, уже возвращённые продажей долей.</small></div>
+    <div className="v16-break-even"><span>Цена, чтобы не осталось долга по бизнесу и залогу</span><b>{money(summary.debtFreeGrossPrice)}</b><small>Отдельный кредит на первоначальный взнос здесь не погашается автоматически и показан выше.</small></div>
   </details>
 }

@@ -11,6 +11,7 @@ import type {
 } from '../domain/types'
 import type { BusinessTemplate } from '../domain/types'
 import { assetMarketValue, loanPayment } from './economy'
+import { addAssetInvestment } from './v16'
 
 const locations = [
   ['У метро', 1.12, 1.08],
@@ -262,6 +263,7 @@ export const resolveEventChains = (
       } else {
         const amount = chain.amount ?? 0
         player.cash -= amount
+        addAssetInvestment(asset, amount)
         asset.incidentCooldown = Math.max(asset.incidentCooldown ?? 0, 1)
         pushEvent(chain.title, `${asset.name}: ремонт обошёлся в ${amount.toLocaleString('ru-RU')} ₽.`, 'bad')
       }

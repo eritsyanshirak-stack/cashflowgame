@@ -1,13 +1,13 @@
 import { board, businesses, chanceCards, developments, difficultySettings, expenseCards, expenseScenarios, initialStockMarket, marketHeadlines, professions, rareDeals } from '../content/content'
 import type { Asset, BotStrategy, BusinessIssue, CommandResult, Decision, DueDiligence, Funding, GameCommand, GameEvent, GameState, Player, RiskRating } from '../domain/types'
-import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, isBankrupt, isFinanciallyFree, loanPayment, meetsFreedomConditions, pledgedLoanForAsset } from '../systems/economy'
+import { assessLoan, assetCashflow, assetMarketValue, createMonthlyReport, effectiveAssetRevenue, isBankrupt, isFinanciallyFree, loanPayment, meetsFreedomConditions, pledgedLoanForAsset, portfolioManagementCost } from '../systems/economy'
 import { developmentCost, emptySkills, grantProgress, playerLevel, skillLevel, trainingCost } from '../systems/progression'
 import { createContractOptions, createStockMarginCall, emptyRecentCards, pickFresh, processAssetListings, settleContracts, stockFreeQuantity, updateGlobalEvent } from '../systems/v14'
 import { handleDecisionV14Command, handleReadyV14Command, quickSellAssetForFunding, sellAssetShareForFunding } from './v14Core'
 import { handleDecisionV15Command, handleReadyV15Command } from './v15Core'
 import { applyDealProfileToAsset, createDealProfile, createSellerCounter, dealProjectedOperatingIncome, negotiationSpecializationBonus, refreshPortfolioSynergies, refreshRivalIntents, resolveEventChains, revealedDealFacts, scheduleDealChain } from '../systems/v15'
 import { STOCK_COMMISSION_RATE, stockPurchaseTotal, stockSaleProceeds } from '../systems/stockSale'
-import { assetInvestmentBasis, calculatePartnershipTerms, reduceAssetInvestmentBasis } from '../systems/v16'
+import { addAssetInvestment, calculateAssetExitResult, calculatePartnershipTerms, recordAssetCashReturn, recordAssetNetCashflow, reduceAssetInvestmentBasis } from '../systems/v16'
 
 export const emptyGame = (seed = Date.now()): GameState => ({
   version: 11,
@@ -365,12 +365,30 @@ const handleDebtStress = (state: GameState, player: Player) => {
   }
 }
 
+const recordMonthlyAssetReturns = (player: Player) => {
+  if (player.assets.length === 0) return
+  const managementCost = portfolioManagementCost(player)
+  const totalEffectiveRevenue = player.assets.reduce((sum, asset) => sum + Math.max(0, effectiveAssetRevenue(asset)), 0)
+  for (const asset of player.assets) {
+    const acquisitionLoanPayment = player.loans
+      .filter((loan) => loan.relatedAssetId === asset.id)
+      .reduce((sum, loan) => sum + loan.monthlyPayment, 0)
+    const managementShare = managementCost <= 0
+      ? 0
+      : totalEffectiveRevenue > 0
+        ? Math.round(managementCost * Math.max(0, effectiveAssetRevenue(asset)) / totalEffectiveRevenue)
+        : Math.round(managementCost / player.assets.length)
+    recordAssetNetCashflow(asset, assetCashflow(asset) - acquisitionLoanPayment - managementShare)
+  }
+}
+
 const settleMonth = (state: GameState) => {
   const nextMonth = state.month + 1
   const resaleReturns = state.players.map((player) => player.status === 'active' ? settleResales(state, player, nextMonth) : 0)
   const contractReturns = state.players.map((player) => player.status === 'active' ? settleContracts(state, player, nextMonth, () => random(state)) : 0)
   state.players.forEach((player) => { if (player.status === 'active') processAssetRisks(state, player) })
   resolveEventChains(state, nextMonth, () => random(state), (title, description, tone = 'neutral') => addEvent(state, title, description, tone))
+  state.players.forEach((player) => { if (player.status === 'active') recordMonthlyAssetReturns(player) })
   const humanReport = createMonthlyReport(state.players[0], state.month, state.stockMarket, resaleReturns[0], contractReturns[0])
   state.players.forEach((player, index) => {
     if (player.status !== 'active') return
@@ -473,6 +491,9 @@ const makeAsset = (state: GameState, player: Player, businessId: string, funding
     externalRevenueMultiplier: state.globalEvent?.category === business.category ? state.globalEvent.revenueMultiplier : 1,
     purchaseCashContribution,
     cashInvested: purchaseCashContribution,
+    lifetimeCashInvested: purchaseCashContribution,
+    cashReturned: 0,
+    cumulativeNetCashflow: 0,
   }
   applyDealProfileToAsset(asset, profile, sellerTerm)
   applyIssueToAsset(asset, hiddenIssue)
@@ -489,8 +510,8 @@ const applyDevelopment = (asset: Asset, developmentId: string, cost: number, mar
   asset.marketValue = Math.round(assetMarketValue(asset) * (1 + development.valueRate))
   asset.developments.push(development.id)
   asset.developmentLevel += 1
+  addAssetInvestment(asset, cost)
   asset.totalDevelopmentCost += cost
-  asset.cashInvested = assetInvestmentBasis(asset) + cost
   return true
 }
 
@@ -725,7 +746,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (!asset || !asset.legalIssue || !asset.issueCost) return reject(current, 'У этого актива нет проблемы, требующей оплаты')
     if (player.cash < asset.issueCost) return reject(current, 'Не хватает денег на устранение проблемы')
     player.cash -= asset.issueCost
-    asset.cashInvested = assetInvestmentBasis(asset) + asset.issueCost
+    addAssetInvestment(asset, asset.issueCost)
     addEvent(state, 'Проблема устранена', `${asset.name}: ${asset.legalIssue}. Потрачено ${asset.issueCost.toLocaleString('ru-RU')} ₽.`, 'good')
     asset.legalIssue = undefined
     asset.issueCost = undefined
@@ -765,8 +786,11 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const oldMarketValue = assetMarketValue(asset)
     const soldRatio = command.type === 'SELL_PARTNER_SHARE' ? delta / oldOwnership : 0
     player.cash += command.type === 'BUY_PARTNER_SHARE' ? -sharePrice : sharePrice
-    if (command.type === 'BUY_PARTNER_SHARE') asset.cashInvested = assetInvestmentBasis(asset) + sharePrice
-    else reduceAssetInvestmentBasis(asset, soldRatio)
+    if (command.type === 'BUY_PARTNER_SHARE') addAssetInvestment(asset, sharePrice)
+    else {
+      recordAssetCashReturn(asset, sharePrice)
+      reduceAssetInvestmentBasis(asset, soldRatio)
+    }
     asset.ownership = Math.round(newOwnership * 100) / 100
     asset.revenue = Math.round(asset.revenue * ratio)
     asset.operatingCosts = Math.round(asset.operatingCosts * ratio)
@@ -782,13 +806,11 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const assetIndex = player.assets.findIndex((asset) => asset.id === command.assetId)
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
-    const invested = assetInvestmentBasis(asset)
-    const relatedDebt = player.loans.filter((loan) => loan.relatedAssetId === asset.id).reduce((sum, loan) => sum + loan.balance, 0)
     const marketValue = assetMarketValue(asset)
     const quickPrice = Math.round(marketValue * 0.93)
+    const exit = calculateAssetExitResult(player, asset, quickPrice)
     const { proceeds, bankPayment, deficiency } = sellAsset(player, asset, quickPrice)
-    const result = proceeds - invested - relatedDebt
-    addEvent(state, 'Актив продан срочно', `${asset.name}: рынок ${marketValue.toLocaleString('ru-RU')} ₽, цена быстрой продажи ${quickPrice.toLocaleString('ru-RU')} ₽, банку ${bankPayment.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽, результат к своим вложениям ${result >= 0 ? '+' : ''}${result.toLocaleString('ru-RU')} ₽${relatedDebt > 0 ? `, отдельный кредит на взнос остался ${relatedDebt.toLocaleString('ru-RU')} ₽` : ''}${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, result >= 0 ? 'good' : 'bad')
+    addEvent(state, 'Актив продан срочно', `${asset.name}: рынок ${marketValue.toLocaleString('ru-RU')} ₽, цена быстрой продажи ${quickPrice.toLocaleString('ru-RU')} ₽, банку ${bankPayment.toLocaleString('ru-RU')} ₽, на руки ${proceeds.toLocaleString('ru-RU')} ₽, общий результат владения ${exit.totalProfit >= 0 ? '+' : ''}${exit.totalProfit.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, exit.totalProfit >= 0 ? 'good' : 'bad')
     return { state, accepted: true }
   }
 
@@ -798,11 +820,9 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     if (assetIndex < 0) return reject(current, 'Актив не найден')
     const asset = player.assets[assetIndex]
     if (!asset.saleOffer || asset.offerExpiresMonth !== state.month) return reject(current, 'Предложение уже недоступно')
-    const invested = assetInvestmentBasis(asset)
-    const relatedDebt = player.loans.filter((loan) => loan.relatedAssetId === asset.id).reduce((sum, loan) => sum + loan.balance, 0)
-    const { proceeds } = sellAsset(player, asset, asset.saleOffer)
-    const result = proceeds - invested - relatedDebt
-    addEvent(state, 'Предложение принято', `${asset.name}: на руки ${proceeds.toLocaleString('ru-RU')} ₽, результат к своим вложениям ${result >= 0 ? '+' : ''}${result.toLocaleString('ru-RU')} ₽${relatedDebt > 0 ? `, кредит на взнос остался ${relatedDebt.toLocaleString('ru-RU')} ₽` : ''}`, result >= 0 ? 'good' : 'bad')
+    const exit = calculateAssetExitResult(player, asset, asset.saleOffer)
+    const { proceeds, deficiency } = sellAsset(player, asset, asset.saleOffer)
+    addEvent(state, 'Предложение принято', `${asset.name}: на руки ${proceeds.toLocaleString('ru-RU')} ₽, общий результат владения ${exit.totalProfit >= 0 ? '+' : ''}${exit.totalProfit.toLocaleString('ru-RU')} ₽${deficiency > 0 ? `, остаточный долг ${deficiency.toLocaleString('ru-RU')} ₽` : ''}`, exit.totalProfit >= 0 ? 'good' : 'bad')
     return { state, accepted: true }
   }
 
@@ -932,6 +952,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
     const terms = calculatePartnershipTerms(business, decision.discount, command.ownership)
     const asset = makeAsset(state, player, decision.businessId, funding, terms.dealPrice, undefined, 'basic', 'none')
     if (!asset) return reject(current, `Для входа нужно ${terms.playerCashNeeded.toLocaleString('ru-RU')} ₽, на счёте недостаточно`)
+    asset.partnerName = decision.partnerName
     player.assets.push(asset)
     refreshPortfolioSynergies(player)
     awardProgress(state, player, 55, 'negotiation', 12)
@@ -947,7 +968,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
 
     const liquidation = liquidateAssetsForDeal(player, command.saleAssetIds, command.collateralAssetId)
     if (!liquidation.ok) return reject(current, liquidation.error)
-    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none')
+    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none', decision.profile, decision.sellerTerm)
     if (!asset) return reject(current, command.funding === 'cash' ? 'Даже после продажи выбранных активов денег не хватает' : command.funding.startsWith('partner') ? 'Не хватает денег даже с долей партнёра' : 'Банк не одобрил итоговую схему финансирования')
 
     player.assets.push(asset)
@@ -969,7 +990,7 @@ export const executeCommand = (current: GameState, command: GameCommand): Comman
 
     const liquidation = liquidateAssetsForDeal(player, command.saleAssetIds, command.collateralAssetId)
     if (!liquidation.ok) return reject(current, liquidation.error)
-    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none')
+    const asset = makeAsset(state, player, decision.businessId, command.funding, decision.askingPrice, command.collateralAssetId, decision.inspection ?? 'none', decision.hiddenIssue ?? 'none', decision.profile, decision.sellerTerm)
     if (!asset) return reject(current, 'Не удалось профинансировать эту возможность выбранной схемой')
 
     player.assets.push(asset)
