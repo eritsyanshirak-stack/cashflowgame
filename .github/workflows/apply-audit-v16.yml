@@ -1,0 +1,65 @@
+name: Apply and audit Balance v1.6
+
+on:
+  push:
+    branches: [balance-v1.6-work]
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Reconstruct verified source bundle
+        run: |
+          cat .tmp/v16part00 .tmp/v16part01 .tmp/v16part02 .tmp/v16part03 .tmp/v16part04 | base64 -d > /tmp/v16-modified-files.tar.gz
+          echo '3f74df0ba8720ddfdf39fa59caaf85fd272d2f3f25e34093f4723559a4b6a0e3  /tmp/v16-modified-files.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/v16-modified-files.tar.gz
+      - name: Install dependencies
+        run: npm ci
+      - name: Run all tests
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
+      - name: Verify standalone bundle
+        run: |
+          grep -q 'src="./assets/' dist/index.html
+          grep -q 'href="./assets/' dist/index.html
+          test -s dist/index.html
+          test -n "$(find dist/assets -type f -name '*.js' -print -quit)"
+          test -n "$(find dist/assets -type f -name '*.css' -print -quit)"
+      - name: Publish clean v1.6 preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/v16-preview
+          mkdir -p /tmp/v16-preview
+          cp -R dist/. /tmp/v16-preview/
+          cd /tmp/v16-preview
+          git init
+          git checkout -b balance-v16-preview-static
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "preview: audited balance v1.6"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin balance-v16-preview-static
+      - name: Remove one-time files
+        run: |
+          rm -rf .tmp
+          rm -f .github/workflows/export-v16-source.yml .github/workflows/apply-audit-v16.yml
+      - name: Commit audited source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: clarify partnerships, assets and stock returns" || exit 0
+          git push
